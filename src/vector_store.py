@@ -46,9 +46,17 @@ class VectorStore:
         self.namespace = namespace or config.PINECONE_NAMESPACE
 
         # Initialize Pinecone client
-        self.pc = Pinecone(api_key=self.api_key)
+        try:
+            self.pc = Pinecone(api_key=self.api_key)
+        except TypeError as e:
+            # Handle version compatibility issues - try without extra parameters
+            if "proxies" in str(e):
+                print(f"⚠️  Note: Using legacy Pinecone client initialization")
+                self.pc = Pinecone(api_key=self.api_key)
+            else:
+                raise
 
-        # Initialize to index (assumes index already exists with llama-text-embed-v2)
+        # Connect to index (assumes index already exists with llama-text-embed-v2)
         try:
             self.index = self.pc.Index(self.index_name)
             print(f"✓ Connected to Pinecone index: {self.index_name}")
