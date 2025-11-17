@@ -4,7 +4,7 @@ Manages Pinecone vector database operations with llama-text-embed-v2 embedding m
 """
 
 from typing import List, Dict, Optional
-from pinecone import Pinecone
+import pinecone
 import hashlib
 import json
 
@@ -45,20 +45,10 @@ class VectorStore:
         self.index_name = index_name or config.PINECONE_INDEX_NAME
         self.namespace = namespace or config.PINECONE_NAMESPACE
 
-        # Initialize Pinecone client
+        # Initialize Pinecone client (using 2.x API)
         try:
-            self.pc = Pinecone(api_key=self.api_key)
-        except TypeError as e:
-            # Handle version compatibility issues - try without extra parameters
-            if "proxies" in str(e):
-                print(f"⚠️  Note: Using legacy Pinecone client initialization")
-                self.pc = Pinecone(api_key=self.api_key)
-            else:
-                raise
-
-        # Connect to index (assumes index already exists with llama-text-embed-v2)
-        try:
-            self.index = self.pc.Index(self.index_name)
+            pinecone.init(api_key=self.api_key)
+            self.index = pinecone.Index(self.index_name)
             print(f"✓ Connected to Pinecone index: {self.index_name}")
         except Exception as e:
             print(f"⚠️  Warning: Could not connect to index '{self.index_name}': {e}")
