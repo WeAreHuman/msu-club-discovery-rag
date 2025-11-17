@@ -2,6 +2,8 @@
 MSU Club Discovery RAG Assistant - Streamlit Deployment
 Interactive interface for students to discover MSU clubs
 Streamlit deployment version without data ingestion functionality
+
+Uses Pinecone 2.x API with proper initialization
 """
 
 import streamlit as st
