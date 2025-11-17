@@ -11,7 +11,12 @@ import json
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 # Try to import sentence-transformers for embeddings, fall back to hash-based if not available
 try:

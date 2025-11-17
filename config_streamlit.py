@@ -9,12 +9,7 @@ from pathlib import Path
 # ============================================================================
 # PINECONE CONFIGURATION (from Streamlit Secrets)
 # ============================================================================
-try:
-    PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
-except KeyError:
-    st.error("❌ PINECONE_API_KEY not found in Streamlit secrets!")
-    st.stop()
-
+PINECONE_API_KEY = st.secrets.get("PINECONE_API_KEY", None)
 PINECONE_INDEX_NAME = st.secrets.get("PINECONE_INDEX_NAME", "msu-clubs-index")
 PINECONE_NAMESPACE = st.secrets.get("PINECONE_NAMESPACE", "clubs")
 
@@ -27,15 +22,7 @@ EMBEDDING_MODEL = "llama-text-embed-v2"  # Hosted on Pinecone
 LLM_PROVIDER = st.secrets.get("LLM_PROVIDER", "groq")  # "groq" or "anthropic"
 
 # API Keys from Streamlit secrets
-try:
-    if LLM_PROVIDER == "groq":
-        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    else:
-        GROQ_API_KEY = None
-except KeyError:
-    st.error("❌ GROQ_API_KEY not found in Streamlit secrets!")
-    st.stop()
-
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", None)
 ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", None)
 
 # Model selection based on provider
@@ -71,13 +58,16 @@ def validate_config():
     Raises error if critical config is missing
     """
     if not PINECONE_API_KEY:
-        raise ValueError("PINECONE_API_KEY is not set in Streamlit secrets")
+        st.error("❌ PINECONE_API_KEY not found in Streamlit secrets!")
+        st.stop()
 
     if LLM_PROVIDER == "groq" and not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER is 'groq'")
+        st.error("❌ GROQ_API_KEY not found in Streamlit secrets!")
+        st.stop()
 
     if LLM_PROVIDER == "anthropic" and not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER is 'anthropic'")
+        st.error("❌ ANTHROPIC_API_KEY not found in Streamlit secrets!")
+        st.stop()
 
     st.success(f"✓ Configuration validated successfully")
     st.caption(f"LLM Provider: {LLM_PROVIDER} | Model: {LLM_MODEL} | Pinecone Index: {PINECONE_INDEX_NAME}")

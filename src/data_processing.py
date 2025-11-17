@@ -13,7 +13,12 @@ from datetime import datetime
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 
 class DocumentProcessor:
@@ -65,7 +70,7 @@ class DocumentProcessor:
         Returns:
             Extracted text content
         """
-        
+
         try:
             doc = fitz.open(str(file_path))
             text = ""

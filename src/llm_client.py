@@ -10,7 +10,12 @@ from abc import ABC, abstractmethod
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 
 class BaseLLMClient(ABC):
