@@ -65,6 +65,7 @@ class DocumentProcessor:
         Returns:
             Extracted text content
         """
+        
         try:
             doc = fitz.open(str(file_path))
             text = ""
