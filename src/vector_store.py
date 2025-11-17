@@ -45,10 +45,10 @@ class VectorStore:
         self.index_name = index_name or config.PINECONE_INDEX_NAME
         self.namespace = namespace or config.PINECONE_NAMESPACE
 
-        # Initialize Pinecone client (using 2.x API)
+        # Initialize Pinecone client (using class-based API compatible with 2.x and 5.x)
         try:
-            pinecone.init(api_key=self.api_key)
-            self.index = pinecone.Index(self.index_name)
+            self.pc = pinecone.Pinecone(api_key=self.api_key)
+            self.index = self.pc.Index(self.index_name)
             print(f"✓ Connected to Pinecone index: {self.index_name}")
         except Exception as e:
             print(f"⚠️  Warning: Could not connect to index '{self.index_name}': {e}")
