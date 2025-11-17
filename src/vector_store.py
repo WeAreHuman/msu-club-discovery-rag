@@ -4,6 +4,14 @@ Manages Pinecone vector database operations with llama-text-embed-v2 embedding m
 """
 
 from typing import List, Dict, Optional
+import sys
+
+# Workaround: Patch pinecone's deprecated plugin check
+# The check is too strict and fails even if the plugin isn't being used
+# We'll disable it since pinecone 5.x has the features natively
+sys.modules['pinecone_plugins'] = None
+sys.modules['pinecone_plugins.inference'] = None
+
 import pinecone
 import hashlib
 import json
