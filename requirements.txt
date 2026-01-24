@@ -6,7 +6,7 @@ streamlit==1.31.0
 sentence-transformers>=2.2.0
 
 # LLM Integration
-groq==0.4.2
+groq>=1.0.0  # Compatible with modern httpx versions
 
 # Utilities
 pydantic
