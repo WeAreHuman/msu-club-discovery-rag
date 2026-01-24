@@ -1,7 +1,7 @@
 """
 LLM Client Module
-Provides unified interface for multiple LLM providers (Groq, Anthropic)
-Defaults to Groq for free usage
+Provides unified interface for LLM providers
+Defaults to Groq for free usage on Streamlit Cloud
 """
 
 from typing import List, Dict, Optional
@@ -10,7 +10,12 @@ from abc import ABC, abstractmethod
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 
 class BaseLLMClient(ABC):
@@ -113,94 +118,24 @@ class GroqClient(BaseLLMClient):
             return f"Error: {str(e)}"
 
 
-class AnthropicClient(BaseLLMClient):
-    """
-    Anthropic Claude client (PAID API)
-    Supports Claude 3 models
-    """
-
-    def __init__(self, api_key: str = None, model: str = None):
-        """
-        Initialize Anthropic client
-
-        Args:
-            api_key: Anthropic API key (defaults to config)
-            model: Model name (defaults to config)
-        """
-        try:
-            from anthropic import Anthropic
-        except ImportError:
-            raise ImportError("Please install anthropic: pip install anthropic")
-
-        self.api_key = api_key or config.ANTHROPIC_API_KEY
-        self.model = model or config.LLM_MODEL
-
-        if not self.api_key:
-            raise ValueError("Anthropic API key is required. Set ANTHROPIC_API_KEY in .env file")
-
-        self.client = Anthropic(api_key=self.api_key)
-        print(f"✓ Initialized Anthropic client with model: {self.model}")
-
-    def generate(
-        self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: float = None,
-        max_tokens: int = None
-    ) -> str:
-        """
-        Generate response using Anthropic API
-
-        Args:
-            prompt: User prompt
-            system_prompt: Optional system instructions
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-
-        Returns:
-            Generated text
-        """
-        temperature = temperature if temperature is not None else config.LLM_TEMPERATURE
-        max_tokens = max_tokens or config.LLM_MAX_TOKENS
-
-        try:
-            # Call Anthropic API
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt or "",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            return response.content[0].text
-
-        except Exception as e:
-            print(f"⚠️  Error calling Anthropic API: {e}")
-            return f"Error: {str(e)}"
-
-
 def get_llm_client(provider: str = None, **kwargs) -> BaseLLMClient:
     """
-    Factory function to get appropriate LLM client based on provider
+    Factory function to get LLM client (Groq only for deployment)
 
     Args:
-        provider: LLM provider name ("groq" or "anthropic")
+        provider: LLM provider name (defaults to config, recommend "groq")
         **kwargs: Additional arguments for client initialization
 
     Returns:
-        Initialized LLM client
+        Initialized LLM client (Groq)
     """
     provider = provider or config.LLM_PROVIDER
+    
+    if provider and provider.lower() not in ["groq", "groq-free"]:
+        print(f"⚠️  Warning: Provider '{provider}' not supported on Streamlit. Using Groq.")
 
-    if provider.lower() == "groq":
-        return GroqClient(**kwargs)
-    elif provider.lower() == "anthropic":
-        return AnthropicClient(**kwargs)
-    else:
-        raise ValueError(f"Unsupported LLM provider: {provider}. Use 'groq' or 'anthropic'")
+    # Use Groq for both deployment and fallback
+    return GroqClient(**kwargs)
 
 
 # ============================================================================

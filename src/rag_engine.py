@@ -15,7 +15,12 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.vector_store import VectorStore
 from src.llm_client import get_llm_client, BaseLLMClient
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 
 class RAGEngine:

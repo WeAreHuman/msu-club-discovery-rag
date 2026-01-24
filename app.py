@@ -3,9 +3,17 @@ MSU Club Discovery RAG Assistant - Streamlit Web App
 Interactive interface for students to discover MSU clubs
 """
 
+import sys
+
+# Workaround: Create a dummy readline module for Windows compatibility
+# readline is a Unix-only module but some packages try to import it unconditionally
+if 'readline' not in sys.modules:
+    import types
+    readline_module = types.ModuleType('readline')
+    sys.modules['readline'] = readline_module
+
 import streamlit as st
 from pathlib import Path
-import sys
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent))

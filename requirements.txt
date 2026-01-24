@@ -1,26 +1,14 @@
 # Core Dependencies
-pinecone-client==5.0.1
+pinecone>=5.0.0  # Official pinecone package (not pinecone-client)
 streamlit==1.31.0
-python-dotenv==1.0.0
 
-# Document Processing
-PyMuPDF==1.23.26
-pypdf==4.0.1
-python-docx==1.1.0
+# Text Processing & Embeddings
+sentence-transformers>=2.2.0
 
-# Text Processing & Chunking
-langchain
-langchain-community
-langsmith
-langchain-text-splitters
-tiktoken
-
-# LLM Integration (Free Options)
-groq==0.4.2
-anthropic==0.18.1  # Optional: if user has API credits
+# LLM Integration
+groq>=1.0.0  # Compatible with modern httpx versions
 
 # Utilities
 pydantic
 requests
-numpy==1.26.3
-pandas==2.2.0
+numpy>=1.24.0

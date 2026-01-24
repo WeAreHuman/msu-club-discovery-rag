@@ -4,14 +4,34 @@ Manages Pinecone vector database operations with llama-text-embed-v2 embedding m
 """
 
 from typing import List, Dict, Optional
-from pinecone import Pinecone
+import sys
+
+# Workaround: Create a dummy readline module for Windows compatibility
+# readline is a Unix-only module but some packages try to import it unconditionally
+if 'readline' not in sys.modules:
+    import types
+    readline_module = types.ModuleType('readline')
+    sys.modules['readline'] = readline_module
+
+# Workaround: Patch pinecone's deprecated plugin check
+# The check is too strict and fails even if the plugin isn't being used
+# We'll disable it since pinecone 5.x has the features natively
+sys.modules['pinecone_plugins'] = None
+sys.modules['pinecone_plugins.inference'] = None
+
+import pinecone
 import hashlib
 import json
 
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-import config
+
+# Try to import config_streamlit first (for Streamlit deployment), fall back to config
+try:
+    import config_streamlit as config
+except ImportError:
+    import config
 
 # Try to import sentence-transformers for embeddings, fall back to hash-based if not available
 try:
@@ -40,11 +60,9 @@ class VectorStore:
         self.index_name = index_name or config.PINECONE_INDEX_NAME
         self.namespace = namespace or config.PINECONE_NAMESPACE
 
-        # Initialize Pinecone client
-        self.pc = Pinecone(api_key=self.api_key)
-
-        # Initialize to index (assumes index already exists with llama-text-embed-v2)
+        # Initialize Pinecone client (using class-based API compatible with 2.x and 5.x)
         try:
+            self.pc = pinecone.Pinecone(api_key=self.api_key)
             self.index = self.pc.Index(self.index_name)
             print(f"✓ Connected to Pinecone index: {self.index_name}")
         except Exception as e:
