@@ -1,9 +1,13 @@
 # Core Dependencies
 pinecone>=5.0.0  # Official pinecone package (not pinecone-client)
 streamlit==1.31.0
+python-dotenv>=1.0.0  # For environment variable management
 
 # Text Processing & Embeddings
 sentence-transformers>=2.2.0
+PyMuPDF>=1.23.0  # For PDF document processing
+langchain-text-splitters>=0.0.1  # For intelligent text chunking
+tiktoken>=0.5.0  # For token counting and estimation
 
 # LLM Integration
 groq>=1.0.0  # Compatible with modern httpx versions
