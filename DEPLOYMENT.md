@@ -1,200 +1,138 @@
-# Streamlit Deployment Guide
+# Deployment Guide
 
-## Overview
-This guide explains how to deploy the MSU Club Discovery RAG Assistant using Streamlit Cloud or a self-hosted Streamlit server.
+## How configuration works
 
-## Prerequisites
-- Python 3.8+
-- Pinecone account with pre-populated vector database
-- Groq API key (free tier available)
-- Streamlit account (for cloud deployment)
+The app uses a single `config.py` that reads from environment variables via `os.getenv()`.
+This works identically in both environments:
 
-## Local Testing
+| Environment | How secrets are supplied |
+|---|---|
+| Local | `.env` file loaded by `python-dotenv` |
+| Streamlit Cloud | Secrets dashboard → auto-exposed as env vars |
 
-### 1. Install Dependencies
+There is one `app.py` entry point for both.
+
+---
+
+## Local Development
+
+### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure Secrets Locally
-Create `.streamlit/secrets.toml`:
-```toml
-PINECONE_API_KEY = "your-pinecone-api-key"
-PINECONE_INDEX_NAME = "msu-clubs-index"
-PINECONE_NAMESPACE = "clubs"
-LLM_PROVIDER = "groq"
-GROQ_API_KEY = "your-groq-api-key"
-LLM_MODEL = "llama-3.3-70b-versatile"
-```
-
-**Important:** Never commit `secrets.toml` to version control!
-
-### 3. Run Locally
+### 2. Configure secrets
+Copy `.env.example` to `.env` and fill in your keys:
 ```bash
-streamlit run app_streamlit.py
+cp .env.example .env
+```
+```env
+PINECONE_API_KEY=your-pinecone-api-key
+PINECONE_INDEX_NAME=msu-clubs-index
+PINECONE_NAMESPACE=msu-clubs
+LLM_PROVIDER=groq
+GROQ_API_KEY=your-groq-api-key
+LLM_MODEL=llama-3.3-70b-versatile
+SCRAPER_ORGS_DIR=D:/msu_scraper/data/orgs
 ```
 
-The app will be available at `http://localhost:8501`
+### 3. Ingest data
+```bash
+python ingest_data.py
+```
+
+### 4. Run the app
+```bash
+streamlit run app.py
+```
 
 ---
 
 ## Streamlit Cloud Deployment
 
-### 1. Push Code to GitHub
+### 1. Push to GitHub
 ```bash
 git add .
-git commit -m "Deploy streamlit version"
-git push origin streamlit-deploy
+git commit -m "deploy"
+git push origin main
 ```
 
-### 2. Create Streamlit App on Streamlit Cloud
+### 2. Create app on Streamlit Cloud
 1. Go to [share.streamlit.io](https://share.streamlit.io)
 2. Click "New app"
-3. Select your GitHub repository and `streamlit-deploy` branch
-4. Select `app_streamlit.py` as the main file
+3. Select your repository and branch
+4. Set **Main file** to `app.py`
 
-### 3. Add Secrets
-1. In Streamlit Cloud app settings, go to "Secrets"
-2. Add your secrets in TOML format:
+### 3. Add secrets
+In app settings → Secrets, add the same keys as your `.env`:
 ```toml
 PINECONE_API_KEY = "your-pinecone-api-key"
 PINECONE_INDEX_NAME = "msu-clubs-index"
-PINECONE_NAMESPACE = "clubs"
+PINECONE_NAMESPACE = "msu-clubs"
 LLM_PROVIDER = "groq"
 GROQ_API_KEY = "your-groq-api-key"
 LLM_MODEL = "llama-3.3-70b-versatile"
 ```
 
-### 4. Deploy
-Your app will automatically deploy and restart when you push changes to GitHub!
+Streamlit Cloud exposes these as environment variables, so `config.py` picks them up
+via `os.getenv()` — no code changes needed between environments.
 
 ---
 
-## Self-Hosted Deployment (Docker)
+## Docker (Self-Hosted)
 
-### Dockerfile
-Create a `Dockerfile`:
 ```dockerfile
 FROM python:3.11-slim
-
 WORKDIR /app
-
-# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy app files
 COPY . .
-
-# Expose port
 EXPOSE 8501
-
-# Run Streamlit
-CMD ["streamlit", "run", "app_streamlit.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
 
-### Docker Compose
-Create `docker-compose.yml`:
-```yaml
-version: '3.8'
-
-services:
-  streamlit-app:
-    build: .
-    ports:
-      - "8501:8501"
-    environment:
-      PINECONE_API_KEY: ${PINECONE_API_KEY}
-      PINECONE_INDEX_NAME: msu-clubs-index
-      PINECONE_NAMESPACE: clubs
-      LLM_PROVIDER: groq
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      LLM_MODEL: llama-3.3-70b-versatile
-    volumes:
-      - ./.streamlit:/app/.streamlit
-```
-
-### Run with Docker
+Pass secrets as environment variables:
 ```bash
-docker-compose up -d
+docker run -p 8501:8501 \
+  -e PINECONE_API_KEY=... \
+  -e GROQ_API_KEY=... \
+  -e PINECONE_INDEX_NAME=msu-clubs-index \
+  -e PINECONE_NAMESPACE=msu-clubs \
+  -e LLM_PROVIDER=groq \
+  -e LLM_MODEL=llama-3.3-70b-versatile \
+  msu-club-app
 ```
 
 ---
 
-## Production Best Practices
+## File structure
 
-### 1. Environment Variables
-- Use Streamlit secrets for sensitive data
-- Never hardcode API keys
-- Use environment-specific configurations
-
-### 2. Performance
-- Cache RAG engine initialization
-- Use Streamlit's caching decorators (`@st.cache_resource`)
-- Limit number of results returned
-
-### 3. Monitoring
-- Monitor Streamlit logs for errors
-- Set up alerts for API failures
-- Track usage metrics
-
-### 4. Security
-- Use HTTPS for all connections
-- Implement rate limiting if needed
-- Validate user inputs
-- Keep dependencies updated
+```
+project/
+├── app.py                # Single Streamlit entry point (local + cloud)
+├── config.py             # Reads env vars — works everywhere
+├── ingest_data.py        # CLI: load scraper output into Pinecone
+├── requirements.txt
+├── .env                  # Local secrets (gitignored)
+├── .env.example          # Secrets template
+├── src/
+│   ├── data_processing.py
+│   ├── vector_store.py
+│   ├── rag_engine.py
+│   └── llm_client.py
+└── .streamlit/
+    └── config.toml       # Streamlit UI config (theme, etc.) — safe to commit
+```
 
 ---
 
 ## Troubleshooting
 
-### Issue: "Secret not found" error
-**Solution:** Ensure all required secrets are added to `.streamlit/secrets.toml` (local) or Streamlit Cloud settings (cloud)
+**"API key not found" on Streamlit Cloud**
+→ Check the Secrets panel in your app settings. Key names must match exactly (case-sensitive).
 
-### Issue: Slow search results
-**Solution:** 
-- Check Pinecone connection
-- Verify embedding model is working
-- Monitor API response times
+**Slow search results**
+→ Check Pinecone index status and verify the namespace has data (`python ingest_data.py --club asa` to test with one club).
 
-### Issue: "Dimension mismatch" error
-**Solution:**
-- Ensure sentence-transformers is installed
-- Verify Pinecone index has 1024 dimensions
-- Check that embeddings are being generated correctly
-
-### Issue: App crashes on startup
-**Solution:**
-- Check Streamlit logs: `streamlit run app_streamlit.py --logger.level=debug`
-- Verify all dependencies are installed
-- Check for missing or invalid secrets
-
----
-
-## File Structure for Deployment
-
-```
-project/
-├── app_streamlit.py          # Main Streamlit app (deployment version)
-├── requirements.txt          # Streamlit deployment dependencies
-├── config_streamlit.py       # Streamlit secrets configuration
-├── .streamlit/
-│   ├── config.toml          # Streamlit configuration
-│   └── secrets.toml.example # Secrets template
-├── src/
-│   ├── vector_store.py      # Pinecone integration
-│   ├── rag_engine.py        # RAG logic
-│   └── llm_client.py        # LLM integration
-├── Dockerfile               # Docker configuration
-├── docker-compose.yml       # Docker Compose configuration
-└── DEPLOYMENT.md           # This file
-```
-
----
-
-## Support & Resources
-
-- [Streamlit Documentation](https://docs.streamlit.io/)
-- [Streamlit Cloud Docs](https://docs.streamlit.io/streamlit-cloud)
-- [Pinecone Documentation](https://docs.pinecone.io/)
-- [Groq API Docs](https://console.groq.com/docs)
+**App crashes on startup**
+→ Run locally first: `streamlit run app.py --logger.level=debug`

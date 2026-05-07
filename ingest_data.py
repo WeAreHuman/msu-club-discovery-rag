@@ -1,182 +1,189 @@
 """
 Data Ingestion Script
-Processes club documents and uploads them to Pinecone vector database
+Reads msu_scraper output and uploads club chunks to Pinecone.
+
+Usage:
+  python ingest_data.py                        # resume from checkpoint (skip already-done clubs)
+  python ingest_data.py --scraper-orgs-dir D:/msu_scraper/data/orgs
+  python ingest_data.py --club asa             # single club (by slug)
+  python ingest_data.py --clear                # wipe namespace + checkpoint and restart
 """
 
 import argparse
+from collections import Counter
 from pathlib import Path
 import sys
 
-# Add current directory to path
 sys.path.append(str(Path(__file__).parent))
 
-from src.data_processing import DocumentProcessor
+from src.data_processing import ClubDataProcessor
 from src.vector_store import VectorStore
 import config
 
+CHECKPOINT_FILE = Path(__file__).parent / ".ingest_checkpoint.txt"
 
-def ingest_documents(
-    input_dir: Path = None,
+
+def load_checkpoint() -> set:
+    """Return set of slugs already successfully upserted."""
+    if not CHECKPOINT_FILE.exists():
+        return set()
+    return set(CHECKPOINT_FILE.read_text(encoding="utf-8").splitlines())
+
+
+def save_checkpoint(slug: str):
+    with open(CHECKPOINT_FILE, "a", encoding="utf-8") as f:
+        f.write(slug + "\n")
+
+
+def ingest(
+    orgs_dir: Path,
+    club_slug: str = None,
     clear_existing: bool = False,
-    batch_size: int = 100
+    batch_size: int = 96,
 ):
-    """
-    Main ingestion pipeline
+    print("=" * 70)
+    print("MSU CLUB DISCOVERY — DATA INGESTION")
+    print("=" * 70)
 
-    Args:
-        input_dir: Directory containing club documents (defaults to config.RAW_DATA_DIR)
-        clear_existing: Whether to clear existing data in namespace before ingesting
-        batch_size: Number of chunks to upload per batch
-    """
-
-    input_dir = input_dir or config.RAW_DATA_DIR
-
-    print("="*80)
-    print("MSU CLUB DISCOVERY - DATA INGESTION")
-    print("="*80)
-
-    # Validate configuration
     try:
         config.validate_config()
-    except Exception as e:
-        print(f"\n❌ Configuration error: {e}")
-        print("\nPlease set up your .env file with required API keys:")
-        print("  - PINECONE_API_KEY")
-        print(f"  - {config.LLM_PROVIDER.upper()}_API_KEY")
+    except ValueError as e:
+        print(f"\nConfiguration error: {e}")
+        print("Check your .env file.")
         return
 
-    # Check input directory
-    if not input_dir.exists():
-        print(f"\n❌ Input directory not found: {input_dir}")
-        print(f"\nPlease create the directory and add club documents:")
-        print(f"  mkdir -p {input_dir}")
-        print(f"  # Add your PDF/TXT files to {input_dir}")
+    if not orgs_dir.exists():
+        print(f"\nScraper orgs directory not found: {orgs_dir}")
+        print("Set SCRAPER_ORGS_DIR in your .env or pass --scraper-orgs-dir")
         return
-
-    # Count files
-    file_count = len([f for f in input_dir.rglob('*') if f.suffix.lower() in config.SUPPORTED_FORMATS])
-    if file_count == 0:
-        print(f"\n⚠️  No supported documents found in {input_dir}")
-        print(f"   Supported formats: {', '.join(config.SUPPORTED_FORMATS)}")
-        return
-
-    print(f"\n📁 Input directory: {input_dir}")
-    print(f"📄 Found {file_count} document(s)")
-
-    # Initialize components
-    print("\n" + "-"*80)
-    print("INITIALIZING COMPONENTS")
-    print("-"*80)
-
-    processor = DocumentProcessor(
-        chunk_size=config.CHUNK_SIZE,
-        chunk_overlap=config.CHUNK_OVERLAP
-    )
 
     vector_store = VectorStore(
         api_key=config.PINECONE_API_KEY,
         index_name=config.PINECONE_INDEX_NAME,
-        namespace=config.PINECONE_NAMESPACE
+        namespace=config.PINECONE_NAMESPACE,
     )
 
-    # Clear existing data if requested
     if clear_existing:
-        print(f"\n🗑️  Clearing existing data in namespace '{config.PINECONE_NAMESPACE}'...")
-        confirm = input("   Are you sure? This cannot be undone. Type 'yes' to confirm: ")
-        if confirm.lower() == 'yes':
+        print(f"\nClearing namespace '{config.PINECONE_NAMESPACE}'...")
+        confirm = input("  This cannot be undone. Type 'yes' to confirm: ")
+        if confirm.strip().lower() == "yes":
             vector_store.delete_namespace()
+            if CHECKPOINT_FILE.exists():
+                CHECKPOINT_FILE.unlink()
+                print("  Checkpoint cleared.")
         else:
-            print("   Skipped deletion.")
+            print("  Skipped.")
 
-    # Process documents
-    print("\n" + "-"*80)
-    print("PROCESSING DOCUMENTS")
-    print("-"*80)
+    processor = ClubDataProcessor()
+    print(f"\nSource : {orgs_dir}")
 
-    chunks = processor.process_directory(input_dir)
-
-    if not chunks:
-        print("\n⚠️  No chunks created. Please check your documents.")
+    # ── Single-club mode ──────────────────────────────────────────────────────
+    if club_slug:
+        club_dir = orgs_dir / club_slug
+        if not club_dir.exists():
+            print(f"Club directory not found: {club_dir}")
+            return
+        chunks = processor.process_club_dir(club_dir)
+        if not chunks:
+            print("No chunks generated.")
+            return
+        upserted = vector_store.upsert_chunks(chunks, batch_size=batch_size)
+        if upserted:
+            save_checkpoint(club_slug)
+        print(f"\nDone: {upserted}/{len(chunks)} chunks upserted for '{club_slug}'")
         return
 
-    # Upload to Pinecone
-    print("\n" + "-"*80)
-    print("UPLOADING TO PINECONE")
-    print("-"*80)
+    # ── Full / resume mode ────────────────────────────────────────────────────
+    done = load_checkpoint()
+    club_dirs = sorted(d for d in orgs_dir.iterdir() if d.is_dir() and (d / "profile.json").exists())
+    remaining = [d for d in club_dirs if d.name not in done]
 
-    upserted_count = vector_store.upsert_chunks(chunks, batch_size=batch_size)
+    print(f"Clubs  : {len(club_dirs)} total  |  {len(done)} already done  |  {len(remaining)} remaining")
 
-    # Summary
-    print("\n" + "="*80)
-    print("INGESTION COMPLETE")
-    print("="*80)
-    print(f"✓ Documents processed: {file_count}")
-    print(f"✓ Chunks created: {len(chunks)}")
-    print(f"✓ Chunks uploaded: {upserted_count}")
-    print(f"✓ Namespace: {config.PINECONE_NAMESPACE}")
-    print(f"✓ Index: {config.PINECONE_INDEX_NAME}")
+    if not remaining:
+        print("\nAll clubs already ingested. Use --clear to restart from scratch.")
+        return
 
-    # Display index stats
-    print("\n📊 Index Statistics:")
-    stats = vector_store.get_stats()
-    if stats:
-        print(f"   Total vectors: {stats.get('total_vector_count', 0)}")
-        namespaces = stats.get('namespaces', {})
-        if config.PINECONE_NAMESPACE in namespaces:
-            ns_count = namespaces[config.PINECONE_NAMESPACE].get('vector_count', 0)
-            print(f"   Vectors in '{config.PINECONE_NAMESPACE}': {ns_count}")
+    total_chunks = 0
+    type_counts: Counter = Counter()
+    errors = 0
 
-    print("\n✓ Data ingestion successful! You can now run the Streamlit app.")
-    print(f"  Run: streamlit run app.py")
+    for idx, club_dir in enumerate(remaining, 1):
+        try:
+            chunks = processor.process_club_dir(club_dir)
+            if not chunks:
+                continue
+
+            upserted = vector_store.upsert_chunks(chunks, batch_size=batch_size)
+            if upserted == len(chunks):
+                save_checkpoint(club_dir.name)
+                total_chunks += upserted
+                for c in chunks:
+                    type_counts[c["metadata"].get("chunk_type", "?")] += 1
+            else:
+                # Partial upsert — token limit or other transient error
+                print(f"\n[STOP] Partial upsert for '{club_dir.name}' ({upserted}/{len(chunks)})")
+                print(f"       {len(done) + idx - 1} clubs done so far. Re-run to continue.")
+                break
+
+        except Exception as e:
+            errors += 1
+            print(f"  [SKIP] {club_dir.name}: {e}")
+
+        if idx % 100 == 0:
+            print(f"  Progress: {idx}/{len(remaining)} this run — {total_chunks} chunks uploaded")
+
+    print("\n" + "=" * 70)
+    print("INGESTION SUMMARY")
+    print("=" * 70)
+    done_now = load_checkpoint()
+    print(f"Clubs done (total) : {len(done_now)}/{len(club_dirs)}")
+    print(f"Chunks this run    : {total_chunks}")
+    for chunk_type, count in sorted(type_counts.items()):
+        print(f"  {chunk_type:<15} {count}")
+    if errors:
+        print(f"Errors             : {errors}")
+    if len(done_now) < len(club_dirs):
+        print(f"\nNot finished — re-run the same command to continue.")
 
 
-# ============================================================================
-# COMMAND LINE INTERFACE
-# ============================================================================
 def main():
-    """
-    Command line interface for data ingestion
-    """
-
     parser = argparse.ArgumentParser(
-        description="Ingest MSU club documents into Pinecone vector database"
+        description="Ingest MSU club data into Pinecone (resumes automatically from checkpoint)"
     )
-
     parser.add_argument(
-        "--input-dir",
+        "--scraper-orgs-dir",
         type=str,
         default=None,
-        help=f"Directory containing club documents (default: {config.RAW_DATA_DIR})"
+        help=f"Path to msu_scraper/data/orgs/ (default: {config.SCRAPER_ORGS_DIR})",
     )
-
+    parser.add_argument(
+        "--club",
+        type=str,
+        default=None,
+        metavar="SLUG",
+        help="Process only one club by its slug (e.g. 'asa')",
+    )
     parser.add_argument(
         "--clear",
         action="store_true",
-        help="Clear existing data in namespace before ingesting"
+        help="Wipe the Pinecone namespace AND the checkpoint, then restart",
     )
-
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=100,
-        help="Number of chunks to upload per batch (default: 100)"
+        default=96,
+        help="Records per Pinecone upsert call (default: 96)",
     )
 
     args = parser.parse_args()
+    orgs_dir = Path(args.scraper_orgs_dir) if args.scraper_orgs_dir else config.SCRAPER_ORGS_DIR
 
-    # Convert input_dir to Path if provided
-    input_dir = Path(args.input_dir) if args.input_dir else None
-    # if args.input_dir:
-    #     input_dir=Path(args.input_dir)
-    # else:
-    #     input_dir=None
-
-
-    # Run ingestion
-    ingest_documents(
-        input_dir=input_dir,
+    ingest(
+        orgs_dir=orgs_dir,
+        club_slug=args.club,
         clear_existing=args.clear,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
     )
 
 

@@ -67,25 +67,21 @@ def render_sidebar():
     Use filters to narrow down your search to clubs that match your preferences.
     """)
 
-    # Dues filter
-    st.sidebar.subheader("💰 Dues/Cost")
-    enable_dues_filter = st.sidebar.checkbox("Filter by maximum dues", value=False)
-    max_dues = None
-    if enable_dues_filter:
-        max_dues = st.sidebar.slider(
-            "Maximum dues ($)",
-            min_value=0,
-            max_value=100,
-            value=25,
-            step=5
-        )
+    # Chunk type filter
+    st.sidebar.subheader("📂 Content Type")
+    chunk_type = st.sidebar.selectbox(
+        "Show results from",
+        options=["All", "profile", "event", "constitution"],
+        index=0,
+        help="Profile = general info, Event = club events, Constitution = bylaws"
+    )
 
-    # Club name filter (exact match)
+    # Club name filter (exact match on org_name)
     st.sidebar.subheader("📋 Specific Club")
     enable_club_filter = st.sidebar.checkbox("Search specific club only", value=False)
-    club_name = None
+    org_name = None
     if enable_club_filter:
-        club_name = st.sidebar.text_input("Club name")
+        org_name = st.sidebar.text_input("Club name (exact)")
 
     # Advanced settings
     st.sidebar.markdown("---")
@@ -110,8 +106,8 @@ def render_sidebar():
     """)
 
     return {
-        "max_dues": max_dues,
-        "club_name": club_name if club_name else None,
+        "chunk_type": chunk_type if chunk_type != "All" else None,
+        "org_name": org_name if org_name else None,
         "top_k": top_k
     }
 
@@ -192,24 +188,15 @@ def main():
     if search_clicked and query:
         with st.spinner("🔍 Searching knowledge base and generating answer..."):
 
-            # Build filter dictionary for explicit filters
-            explicit_filters = {}
-            if filters["club_name"]:
-                explicit_filters["club_name"] = filters["club_name"]
-            if filters["max_dues"] is not None:
-                explicit_filters["max_dues"] = filters["max_dues"]
-
             # Execute RAG query
-            if explicit_filters:
-                # Use explicit filter method
+            if filters["org_name"] or filters["chunk_type"]:
                 response = rag_engine.query_with_metadata_filter(
                     question=query,
-                    club_name=explicit_filters.get("club_name"),
-                    max_dues=explicit_filters.get("max_dues"),
+                    org_name=filters["org_name"],
+                    chunk_type=filters["chunk_type"],
                     top_k=filters["top_k"]
                 )
             else:
-                # Use standard query (with auto-filter extraction)
                 response = rag_engine.query(
                     question=query,
                     top_k=filters["top_k"],
@@ -237,21 +224,24 @@ def main():
 
             for citation in response["citations"]:
                 with st.expander(
-                    f"[{citation['source_number']}] {citation['club_name']} "
+                    f"[{citation['source_number']}] {citation['org_name']} "
+                    f"· {citation['chunk_type']} "
                     f"(Relevance: {citation['relevance_score']:.2%})"
                 ):
-                    st.markdown(f"**Source File**: {citation['source_file']}")
-                    st.markdown(f"**Text Snippet**:")
                     st.markdown(f"> {citation['text_snippet']}")
 
-                    # Additional metadata
                     metadata = citation.get('metadata', {})
-                    if metadata.get('dues'):
-                        st.markdown(f"**Dues**: ${metadata['dues']}")
-                    if metadata.get('meeting_frequency'):
-                        st.markdown(f"**Meeting Frequency**: {metadata['meeting_frequency']}")
-                    if metadata.get('last_updated'):
-                        st.markdown(f"**Last Updated**: {metadata['last_updated']}")
+                    if metadata.get('contact_email'):
+                        st.markdown(f"**Email**: {metadata['contact_email']}")
+                    if metadata.get('contact_website'):
+                        st.markdown(f"**Website**: {metadata['contact_website']}")
+                    if metadata.get('categories'):
+                        cats = metadata['categories']
+                        if isinstance(cats, list):
+                            cats = ", ".join(cats)
+                        st.markdown(f"**Categories**: {cats}")
+                    if metadata.get('org_url'):
+                        st.markdown(f"**CampusLabs**: {metadata['org_url']}")
 
         # Applied filters
         if response.get("filters_applied"):

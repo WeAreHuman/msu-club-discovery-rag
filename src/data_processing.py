@@ -1,319 +1,363 @@
 """
-Document Processing Module
-Handles extraction, cleaning, chunking, and metadata extraction from club documents
+Club Data Processor
+Reads scraper output (profile.json + constitution .txt) and produces
+typed chunks ready for Pinecone ingestion.
+
+3 chunk types per club:
+  profile      — club general info (name, description, contact, officers)
+  event        — one chunk per event; aggregate stats in metadata
+  constitution — article-level chunks, split further when > CONSTITUTION_MAX_TOKENS
 """
 
 import re
-import fitz  # PyMuPDF
+import json
+import html as html_lib
 from pathlib import Path
-from typing import List, Dict, Optional
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from typing import List, Dict, Tuple, Optional
+from collections import Counter
+
 import tiktoken
-from datetime import datetime
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
+import config
 
-# Try to import config_streamlit first (for Streamlit deployment), fall back to config
-try:
-    import config_streamlit as config
-except ImportError:
-    import config
+# Split BEFORE each "Article X" heading (handles "ArticleI:", "Article II -", etc.)
+_ARTICLE_SPLIT_RE = re.compile(r'(?=Article\s*[IVXLCDM]+\s*[:\-])', re.IGNORECASE)
+
+# Parse article number and title from the header line
+_ARTICLE_HEADER_RE = re.compile(r'Article\s*([IVXLCDM]+)\s*[:\-]?\s*(.*)', re.IGNORECASE)
 
 
-class DocumentProcessor:
+class ClubDataProcessor:
     """
-    Processes club documents: extraction, cleaning, chunking, and metadata extraction
+    Processes the msu_scraper output directory into typed Pinecone chunks.
+
+    Input  : .../data/orgs/<slug>/  containing profile.json and
+             documents/<id>.txt  (constitution/bylaws plain text)
+    Output : list of {"text": str, "metadata": dict} ready for VectorStore.upsert_chunks()
     """
 
-    def __init__(self, chunk_size: int = None, chunk_overlap: int = None):
-        """
-        Initialize document processor
+    CONSTITUTION_MAX_TOKENS = config.CONSTITUTION_MAX_TOKENS
+    PROFILE_MAX_TOKENS = config.CHUNK_SIZE
 
-        Args:
-            chunk_size: Number of tokens per chunk (default from config)
-            chunk_overlap: Number of overlapping tokens between chunks (default from config)
-        """
-        self.chunk_size = chunk_size or config.CHUNK_SIZE
-        self.chunk_overlap = chunk_overlap or config.CHUNK_OVERLAP
+    def __init__(self):
+        self._enc = tiktoken.get_encoding("cl100k_base")
 
-        # Initialize tiktoken encoder for token counting (using cl100k_base for approximation)
-        self.encoding = tiktoken.get_encoding("cl100k_base")
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
 
-        # Initialize text splitter with token-based splitting
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            length_function=self._count_tokens,
-            separators=["\n\n", "\n", ". ", " ", ""]
+    def process_orgs_dir(self, orgs_dir: Path) -> List[Dict]:
+        """Walk all club directories under orgs_dir and return all chunks."""
+        club_dirs = sorted(d for d in orgs_dir.iterdir() if d.is_dir())
+        all_chunks: List[Dict] = []
+        total = len(club_dirs)
+        errors = 0
+
+        for idx, club_dir in enumerate(club_dirs, 1):
+            if not (club_dir / "profile.json").exists():
+                continue
+            try:
+                chunks = self.process_club_dir(club_dir)
+                all_chunks.extend(chunks)
+            except Exception as e:
+                errors += 1
+                print(f"  [SKIP] {club_dir.name}: {e}")
+
+            if idx % 200 == 0:
+                print(f"  Progress: {idx}/{total} clubs — {len(all_chunks)} chunks ({errors} errors)")
+
+        print(f"Done: {len(all_chunks)} chunks from {total} clubs ({errors} errors)")
+        return all_chunks
+
+    def process_club_dir(self, club_dir: Path) -> List[Dict]:
+        """Process one club directory → typed chunks."""
+        profile = self._load_json(club_dir / "profile.json")
+        chunks: List[Dict] = []
+        chunks.extend(self._profile_chunks(profile))
+        chunks.extend(self._event_chunks(profile))
+        chunks.extend(self._constitution_chunks(profile, club_dir))
+        return chunks
+
+    # -------------------------------------------------------------------------
+    # Profile chunks
+    # -------------------------------------------------------------------------
+
+    def _profile_chunks(self, profile: Dict) -> List[Dict]:
+        base = self._base_meta(profile)
+        contact = profile.get("contact") or {}
+
+        # Anchor is prepended to every sub-chunk so the club is always identifiable,
+        # even when a long description or officer list forces a split.
+        anchor = (
+            f"Organization: {profile.get('name', '')}\n"
+            f"Categories: {', '.join(profile.get('categories') or [])}\n"
+            f"Status: {profile.get('status', '')}"
         )
 
-    def _count_tokens(self, text: str) -> int:
-        """
-        Count tokens in text using tiktoken
+        # Body holds the variable-length content that may need splitting
+        body_lines: List[str] = []
+        desc = self._strip_html(profile.get("description") or "")
+        summary = (profile.get("summary") or "").strip()
+        body_lines.append(desc or summary)
 
-        Args:
-            text: Input text
+        if contact.get("email"):
+            body_lines.append(f"Contact Email: {contact['email']}")
+        if contact.get("website"):
+            body_lines.append(f"Website: {contact['website']}")
 
-        Returns:
-            Number of tokens
-        """
-        return len(self.encoding.encode(text))
-
-    def extract_text_from_pdf(self, file_path: Path) -> str:
-        """
-        Extract text from PDF file using PyMuPDF
-
-        Args:
-            file_path: Path to PDF file
-
-        Returns:
-            Extracted text content
-        """
-
-        try:
-            doc = fitz.open(str(file_path))
-            text = ""
-
-            # Extract text from each page
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                text += page.get_text()
-
-            doc.close()
-            return text
-
-        except Exception as e:
-            print(f"Error extracting text from {file_path}: {e}")
-            return ""
-
-    def extract_text_from_txt(self, file_path: Path) -> str:
-        """
-        Extract text from TXT file
-
-        Args:
-            file_path: Path to TXT file
-
-        Returns:
-            Extracted text content
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading {file_path}: {e}")
-            return ""
-
-    def clean_text(self, text: str) -> str:
-        """
-        Clean and normalize extracted text
-
-        Args:
-            text: Raw extracted text
-
-        Returns:
-            Cleaned text
-        """
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-
-        # Remove page numbers and common artifacts
-        text = re.sub(r'\b\d+\s*Updated\s+\d+\s+\w+\s+\d{4}\b', '', text)
-
-        # Normalize line breaks
-        text = text.replace('\n ', '\n')
-
-        # Remove leading/trailing whitespace
-        text = text.strip()
-
-        return text
-
-    def extract_metadata_from_text(self, text: str, file_name: str) -> Dict[str, any]:
-        """
-        Extract metadata from document text using rule-based patterns
-        Falls back to providing basic metadata if extraction fails
-
-        Args:
-            text: Document text
-            file_name: Name of the source file
-
-        Returns:
-            Dictionary containing metadata fields
-        """
-        metadata = {
-            "club_name": "",
-            "dues": None,
-            "meeting_frequency": "",
-            "membership_requirements": [],
-            "source_file": file_name,
-            "last_updated": None,
-            "contact_info": "",
-        }
-
-        # Extract club name (usually in title or first Article)
-        club_name_match = re.search(
-            r'(?:name of this organization shall be|organization:)\s+(?:the\s+)?([^.]+(?:Club|Organization|Society)[^.]*)',
-            text,
-            re.IGNORECASE
-        )
-        if club_name_match:
-            metadata["club_name"] = club_name_match.group(1).strip()
-        else:
-            # Fallback: use filename
-            metadata["club_name"] = file_name.replace('.pdf', '').replace('_', ' ').title()
-
-        # Extract dues/fees
-        dues_match = re.search(
-            r'(?:dues|fee|cost)[^\d]*\$?(\d+(?:\.\d{2})?)',
-            text,
-            re.IGNORECASE
-        )
-        if dues_match:
-            metadata["dues"] = float(dues_match.group(1))
-
-        # Extract meeting frequency
-        meeting_patterns = [
-            r'meet(?:ing)?s?\s+(?:every\s+)?(\w+(?:\s+\w+)?)',
-            r'(?:bi-?weekly|monthly|weekly|daily)',
+        social = [
+            f"{s.get('platform', '')}: {s.get('url', '')}"
+            for s in (contact.get("social_links") or [])
         ]
-        for pattern in meeting_patterns:
-            meeting_match = re.search(pattern, text, re.IGNORECASE)
-            if meeting_match:
-                metadata["meeting_frequency"] = meeting_match.group(0).strip()
-                break
+        if social:
+            body_lines.append(f"Social: {', '.join(social)}")
 
-        # Extract last updated date
-        date_match = re.search(
-            r'Updated\s+(\d+\s+\w+\s+\d{4})',
-            text,
-            re.IGNORECASE
-        )
-        if date_match:
-            metadata["last_updated"] = date_match.group(1)
+        officer_lines = []
+        for o in (profile.get("officers") or []):
+            role = o.get("role", "")
+            role = re.sub(r'^[A-Z]\n', '', role).strip()
+            role = re.sub(r'\nDocuments.*', '', role, flags=re.DOTALL).strip()
+            role = role.replace('\n', ' ')
+            officer_lines.append(f"  {role}: {o.get('name', '')}")
+        if officer_lines:
+            body_lines.append("Officers:")
+            body_lines.extend(officer_lines)
 
-        # Extract membership requirements (look for eligibility section)
-        if "membership" in text.lower():
-            # Extract paragraph containing membership info
-            membership_section = re.search(
-                r'(membership[^:]*:.*?)(?=Article|Section|$)',
-                text,
-                re.IGNORECASE | re.DOTALL
-            )
-            if membership_section:
-                membership_text = membership_section.group(1)[:200]  # First 200 chars
-                metadata["membership_requirements"] = [membership_text.strip()]
+        body = "\n".join(body_lines).strip()
+        # Reserve tokens for the anchor so each assembled chunk stays within budget
+        anchor_tokens = self._count_tokens(anchor + "\n\n")
+        body_parts = self._split(body, self.PROFILE_MAX_TOKENS - anchor_tokens)
 
-        return metadata
-
-    def chunk_text(self, text: str, metadata: Dict[str, any]) -> List[Dict[str, any]]:
-        """
-        Split text into chunks with metadata
-
-        Args:
-            text: Cleaned document text
-            metadata: Document-level metadata
-
-        Returns:
-            List of chunks with metadata
-        """
-        # Split text into chunks
-        chunks = self.text_splitter.split_text(text)
-
-        # Create chunk objects with metadata
-        chunk_objects = []
-        for idx, chunk in enumerate(chunks):
-            chunk_obj = {
-                "text": chunk,
+        return [
+            {
+                "text": anchor + "\n\n" + part,
                 "metadata": {
-                    **metadata,  # Include all document metadata
-                    "chunk_index": idx,
-                    "total_chunks": len(chunks),
-                }
+                    **base,
+                    "chunk_type": "profile",
+                    "chunk_index": i,
+                    "total_chunks": len(body_parts),
+                },
             }
-            chunk_objects.append(chunk_obj)
+            for i, part in enumerate(body_parts)
+        ]
 
-        return chunk_objects
+    # -------------------------------------------------------------------------
+    # Event chunks
+    # -------------------------------------------------------------------------
 
-    def process_document(self, file_path: Path) -> List[Dict[str, any]]:
-        """
-        Complete pipeline: extract, clean, chunk, and add metadata
-
-        Args:
-            file_path: Path to document file
-
-        Returns:
-            List of processed chunks with metadata
-        """
-        print(f"\n📄 Processing: {file_path.name}")
-
-        # Step 1: Extract text based on file type
-        if file_path.suffix.lower() == '.pdf':
-            raw_text = self.extract_text_from_pdf(file_path)
-        elif file_path.suffix.lower() == '.txt':
-            raw_text = self.extract_text_from_txt(file_path)
-        else:
-            print(f"  ⚠️  Unsupported file format: {file_path.suffix}")
+    def _event_chunks(self, profile: Dict) -> List[Dict]:
+        events = profile.get("events") or []
+        if not events:
             return []
 
-        if not raw_text:
-            print(f"  ⚠️  No text extracted from {file_path.name}")
+        base = self._base_meta(profile)
+        total_events = len(events)
+
+        # Aggregate: count events per calendar month
+        month_counter: Counter = Counter()
+        for ev in events:
+            ym = (ev.get("start_datetime") or "")[:7]  # "YYYY-MM"
+            if len(ym) == 7:
+                month_counter[ym] += 1
+        events_by_month = json.dumps(dict(sorted(month_counter.items())))
+
+        chunks = []
+        for ev in events:
+            title = ev.get("title") or ""
+            start = ev.get("start_datetime") or ""
+            end = ev.get("end_datetime") or ""
+            venue = ev.get("venue") or ""
+            desc = (ev.get("description") or "").strip()
+            ev_cats = ", ".join(ev.get("category_names") or [])
+            url = ev.get("url") or ""
+
+            lines = [
+                f"Organization: {profile.get('name', '')}",
+                f"Event: {title}",
+            ]
+            if start:
+                date_line = f"Date: {start}"
+                if end and end != start:
+                    date_line += f" to {end}"
+                lines.append(date_line)
+            if venue:
+                lines.append(f"Venue: {venue}")
+            if ev_cats:
+                lines.append(f"Categories: {ev_cats}")
+            if desc:
+                lines.append(f"\n{desc}")
+
+            chunks.append({
+                "text": "\n".join(lines).strip(),
+                "metadata": {
+                    **base,
+                    "chunk_type": "event",
+                    "chunk_index": 0,
+                    "total_chunks": 1,
+                    "event_id": str(ev.get("event_id") or ""),
+                    "event_title": title,
+                    "event_date": start,
+                    "event_venue": venue,
+                    "event_url": url,
+                    "total_events": total_events,
+                    "events_by_month": events_by_month,
+                },
+            })
+        return chunks
+
+    # -------------------------------------------------------------------------
+    # Constitution chunks
+    # -------------------------------------------------------------------------
+
+    def _constitution_chunks(self, profile: Dict, club_dir: Path) -> List[Dict]:
+        txt_path = self._find_constitution_txt(profile, club_dir)
+        if txt_path is None:
             return []
 
-        # Step 2: Clean text
-        cleaned_text = self.clean_text(raw_text)
-        print(f"  ✓ Extracted {len(cleaned_text)} characters")
+        text = txt_path.read_text(encoding="utf-8", errors="replace")
+        base = self._base_meta(profile)
+        doc_id = txt_path.stem
 
-        # Step 3: Extract metadata
-        metadata = self.extract_metadata_from_text(cleaned_text, file_path.name)
-        print(f"  ✓ Metadata: {metadata.get('club_name', 'Unknown')}")
-        if metadata.get('dues'):
-            print(f"    - Dues: ${metadata['dues']}")
+        articles = self._parse_articles(text)
+        chunks: List[Dict] = []
 
-        # Step 4: Chunk text
-        chunks = self.chunk_text(cleaned_text, metadata)
-        print(f"  ✓ Created {len(chunks)} chunks (~{self.chunk_size} tokens each)")
+        for article_num, article_title, article_body in articles:
+            prefix = (
+                f"Organization: {profile.get('name', '')}\n"
+                f"Constitution — Article {article_num}: {article_title}\n\n"
+            )
+            for sub_text in self._split(article_body.strip(), self.CONSTITUTION_MAX_TOKENS):
+                chunks.append({
+                    "text": prefix + sub_text,
+                    "metadata": {
+                        **base,
+                        "chunk_type": "constitution",
+                        "chunk_index": len(chunks),
+                        "total_chunks": 0,  # patched below
+                        "article_num": article_num,
+                        "article_title": article_title,
+                        "doc_id": doc_id,
+                    },
+                })
+
+        for c in chunks:
+            c["metadata"]["total_chunks"] = len(chunks)
 
         return chunks
 
-    def process_directory(self, directory: Path) -> List[Dict[str, any]]:
+    def _find_constitution_txt(self, profile: Dict, club_dir: Path) -> Optional[Path]:
+        docs_dir = club_dir / "documents"
+        if not docs_dir.exists():
+            return None
+
+        # Match by doc_id listed in profile (pick first with a .txt on disk)
+        for doc in (profile.get("documents") or []):
+            doc_id = str(doc.get("doc_id") or "")
+            if doc_id:
+                candidate = docs_dir / f"{doc_id}.txt"
+                if candidate.exists():
+                    return candidate
+
+        # Fallback: first .txt in documents/
+        txts = sorted(docs_dir.glob("*.txt"))
+        return txts[0] if txts else None
+
+    # -------------------------------------------------------------------------
+    # Article parsing
+    # -------------------------------------------------------------------------
+
+    def _parse_articles(self, text: str) -> List[Tuple[str, str, str]]:
         """
-        Process all documents in a directory
-
-        Args:
-            directory: Path to directory containing documents
-
-        Returns:
-            List of all processed chunks from all documents
+        Split constitution text on Article headings.
+        Returns list of (article_num, article_title, body).
+        Falls back to [("", "Constitution", full_text)] if no Articles found.
         """
-        all_chunks = []
+        parts = _ARTICLE_SPLIT_RE.split(text)
 
-        # Find all supported document files
-        for file_path in directory.rglob('*'):
-            if file_path.suffix.lower() in config.SUPPORTED_FORMATS:
-                chunks = self.process_document(file_path)
-                all_chunks.extend(chunks)
+        results: List[Tuple[str, str, str]] = []
+        preamble_parts: List[str] = []
 
-        print(f"\n✓ Total: {len(all_chunks)} chunks from {directory}")
-        return all_chunks
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            m = _ARTICLE_HEADER_RE.match(part)
+            if m:
+                article_num = m.group(1).upper()
+                first_line_rest = m.group(2).strip()
+                body = part[m.end():].strip()
+                article_title = first_line_rest or f"Article {article_num}"
+                results.append((article_num, article_title, body or first_line_rest))
+            else:
+                preamble_parts.append(part)
+
+        if not results:
+            return [("", "Constitution", text.strip())]
+
+        if preamble_parts:
+            preamble_body = "\n\n".join(preamble_parts)
+            results.insert(0, ("0", "Preamble", preamble_body))
+
+        return results
+
+    # -------------------------------------------------------------------------
+    # Helpers
+    # -------------------------------------------------------------------------
+
+    def _base_meta(self, profile: Dict) -> Dict:
+        contact = profile.get("contact") or {}
+        return {
+            "org_id": str(profile.get("org_id") or ""),
+            "org_name": profile.get("name") or "",
+            "org_slug": profile.get("slug") or "",
+            # Stored as list[str] — Pinecone supports $in filtering on list metadata
+            "categories": profile.get("categories") or [],
+            "status": profile.get("status") or "",
+            "contact_email": contact.get("email") or "",
+            "contact_website": contact.get("website") or "",
+            "org_url": profile.get("url") or "",
+            "scraped_at": profile.get("scraped_at") or "",
+        }
+
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = html_lib.unescape(text)
+        return re.sub(r' {2,}', ' ', text).strip()
+
+    def _count_tokens(self, text: str) -> int:
+        return len(self._enc.encode(text))
+
+    def _split(self, text: str, max_tokens: int) -> List[str]:
+        if self._count_tokens(text) <= max_tokens:
+            return [text]
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=max_tokens,
+            chunk_overlap=config.CHUNK_OVERLAP,
+            length_function=self._count_tokens,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        return splitter.split_text(text) or [text]
+
+    @staticmethod
+    def _load_json(path: Path) -> Dict:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
 
 # ============================================================================
-# TESTING / STANDALONE EXECUTION
+# STANDALONE TEST
 # ============================================================================
 if __name__ == "__main__":
-    """Test document processing with sample files"""
-
-    # Initialize processor
-    processor = DocumentProcessor()
-
-    # Test with raw data directory
-    chunks = processor.process_directory(config.RAW_DATA_DIR)
-
-    # Display sample chunk
-    if chunks:
-        print("\n" + "="*80)
-        print("SAMPLE CHUNK:")
-        print("="*80)
-        sample = chunks[0]
-        print(f"Text: {sample['text'][:300]}...")
-        print(f"\nMetadata: {sample['metadata']}")
+    processor = ClubDataProcessor()
+    sample_dir = Path("D:/msu_scraper/data/orgs/-")
+    if sample_dir.exists():
+        chunks = processor.process_club_dir(sample_dir)
+        print(f"\n{len(chunks)} chunks generated")
+        for c in chunks:
+            print(f"\n[{c['metadata']['chunk_type']}] {c['text'][:120]}...")
+    else:
+        print("Sample dir not found — set SCRAPER_ORGS_DIR in .env and run ingest_data.py")

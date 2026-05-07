@@ -1,64 +1,66 @@
 """
-Configuration module for MSU Club Discovery RAG Assistant
-Loads environment variables and provides centralized configuration
+Configuration for MSU Club Discovery RAG Assistant.
+All runtime values come from environment variables (loaded from .env).
 """
 
 import os
+import sys
 from dotenv import load_dotenv
 from pathlib import Path
 
-# Load environment variables from .env file
+# Force UTF-8 stdout/stderr so Unicode in print() works on Windows terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 load_dotenv()
 
 # ============================================================================
-# PINECONE CONFIGURATION
+# PINECONE
 # ============================================================================
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_API_KEY    = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "msu-clubs-index")
-PINECONE_NAMESPACE = os.getenv("PINECONE_NAMESPACE", "clubs")
+PINECONE_NAMESPACE  = os.getenv("PINECONE_NAMESPACE", "msu-clubs")
 
-# Embedding model integrated with Pinecone
-EMBEDDING_MODEL = "llama-text-embed-v2"  # Hosted on Pinecone
+# Hosted embedding model (integrated inference — Pinecone embeds for you)
+EMBEDDING_MODEL = "llama-text-embed-v2"
 
 # ============================================================================
-# LLM CONFIGURATION
+# LLM
 # ============================================================================
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "anthropic"
-
-# API Keys
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "groq")   # "groq" | "anthropic"
+GROQ_API_KEY    = os.getenv("GROQ_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-# Model selection based on provider
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-
-# LLM Generation Parameters
-LLM_TEMPERATURE = 0.3  # Lower for more factual responses
-LLM_MAX_TOKENS = 1000
+LLM_MODEL       = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+LLM_TEMPERATURE = 0.3
+LLM_MAX_TOKENS  = 1000
 
 # ============================================================================
-# DOCUMENT PROCESSING CONFIGURATION
+# CHUNKING
 # ============================================================================
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "300"))  # Tokens per chunk
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # Token overlap
+CHUNK_SIZE               = int(os.getenv("CHUNK_SIZE", "300"))          # tokens — profile chunks
+CHUNK_OVERLAP            = int(os.getenv("CHUNK_OVERLAP", "50"))        # unused by new processor; kept for compat
+CONSTITUTION_MAX_TOKENS  = int(os.getenv("CONSTITUTION_MAX_TOKENS", "350"))  # per .knowledge spec
 
-# Supported file formats
 SUPPORTED_FORMATS = [".pdf", ".txt", ".docx"]
 
 # ============================================================================
-# RETRIEVAL CONFIGURATION
+# RETRIEVAL
 # ============================================================================
-TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))  # Number of chunks to retrieve
+TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))
 
 # ============================================================================
-# DIRECTORY PATHS
+# PATHS
 # ============================================================================
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
-RAW_DATA_DIR = DATA_DIR / "raw"
+BASE_DIR    = Path(__file__).parent
+DATA_DIR    = BASE_DIR / "data"
+RAW_DATA_DIR       = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
-# Create directories if they don't exist
+# Path to the msu_scraper orgs directory (contains one subdir per club)
+SCRAPER_ORGS_DIR = Path(os.getenv("SCRAPER_ORGS_DIR", "D:/msu_scraper/data/orgs"))
+
 RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -66,24 +68,19 @@ PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 # VALIDATION
 # ============================================================================
 def validate_config():
-    """
-    Validates that required configuration variables are set
-    Raises ValueError if critical config is missing
-    """
     if not PINECONE_API_KEY:
-        raise ValueError("PINECONE_API_KEY is not set in environment variables")
-
+        raise ValueError("PINECONE_API_KEY is not set")
     if LLM_PROVIDER == "groq" and not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER is 'groq'")
-
+        raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER=groq")
     if LLM_PROVIDER == "anthropic" and not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER is 'anthropic'")
+        raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
 
-    print(f"✓ Configuration validated successfully")
-    print(f"  - LLM Provider: {LLM_PROVIDER}")
-    print(f"  - LLM Model: {LLM_MODEL}")
-    print(f"  - Pinecone Index: {PINECONE_INDEX_NAME}")
-    print(f"  - Chunk Size: {CHUNK_SIZE} tokens (overlap: {CHUNK_OVERLAP})")
+    print("Configuration validated:")
+    print(f"  LLM          : {LLM_PROVIDER} / {LLM_MODEL}")
+    print(f"  Pinecone     : {PINECONE_INDEX_NAME} / ns={PINECONE_NAMESPACE}")
+    print(f"  Chunk sizes  : profile={CHUNK_SIZE}t  constitution={CONSTITUTION_MAX_TOKENS}t")
+    print(f"  Scraper dir  : {SCRAPER_ORGS_DIR}")
+
 
 if __name__ == "__main__":
     validate_config()
