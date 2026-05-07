@@ -11,11 +11,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-# Try to import config_streamlit first (for Streamlit deployment), fall back to config
-try:
-    import config_streamlit as config
-except ImportError:
-    import config
+import config
 
 
 class BaseLLMClient(ABC):

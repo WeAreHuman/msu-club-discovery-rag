@@ -16,11 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.vector_store import VectorStore
 from src.llm_client import get_llm_client, BaseLLMClient
 
-# Try to import config_streamlit first (for Streamlit deployment), fall back to config
-try:
-    import config_streamlit as config
-except ImportError:
-    import config
+import config
 
 
 class RAGEngine:
@@ -68,20 +64,18 @@ class RAGEngine:
             text = chunk.get("text", "")
             metadata = chunk.get("metadata", {})
 
-            club_name = metadata.get("club_name", "Unknown Club")
-            source_file = metadata.get("source_file", "Unknown Source")
+            org_name = metadata.get("org_name", "Unknown Club")
+            chunk_type = metadata.get("chunk_type", "")
             score = chunk.get("score", 0)
 
-            # Build context entry with citation marker
             context_parts.append(
-                f"[Source {idx + 1}] {club_name}:\n{text}\n"
+                f"[Source {idx + 1}] {org_name}:\n{text}\n"
             )
 
-            # Build citation entry
             citations.append({
                 "source_number": idx + 1,
-                "club_name": club_name,
-                "source_file": source_file,
+                "org_name": org_name,
+                "chunk_type": chunk_type,
                 "relevance_score": score,
                 "text_snippet": text[:150] + "..." if len(text) > 150 else text,
                 "metadata": metadata
@@ -92,30 +86,15 @@ class RAGEngine:
 
     def _extract_filters_from_query(self, query: str) -> Dict:
         """
-        Extract metadata filters from natural language query
-        Examples:
-        - "clubs under $20" -> {"dues": 20}
-        - "weekend clubs" -> (would need more sophisticated NLP)
-
-        Args:
-            query: User query string
-
-        Returns:
-            Dictionary of filters
+        Extract Pinecone metadata filters from natural language query.
+        Currently supports chunk_type steering only; extend as schema evolves.
         """
         filters = {}
 
-        # Extract dues/cost constraints
-        dues_patterns = [
-            r'(?:under|less than|below|max)\s*\$?(\d+)',
-            r'\$(\d+)\s*(?:or less|max|maximum)',
-        ]
-
-        for pattern in dues_patterns:
-            match = re.search(pattern, query, re.IGNORECASE)
-            if match:
-                filters["dues"] = float(match.group(1))
-                break
+        # Steer toward event chunks when the question is clearly event-focused
+        event_keywords = r'\b(event|events|when|upcoming|schedule|meeting|meets)\b'
+        if re.search(event_keywords, query, re.IGNORECASE):
+            filters["chunk_type"] = {"$eq": "event"}
 
         return filters
 
@@ -239,27 +218,24 @@ Please answer the question based on the context above. Cite your sources using [
     def query_with_metadata_filter(
         self,
         question: str,
-        club_name: str = None,
-        max_dues: float = None,
+        org_name: str = None,
+        chunk_type: str = None,
         top_k: int = None
     ) -> Dict:
         """
-        Query with explicit metadata filters
+        Query with explicit metadata filters.
 
         Args:
-            question: User's question
-            club_name: Filter by specific club name
-            max_dues: Maximum dues amount
-            top_k: Number of results
-
-        Returns:
-            Response dictionary
+            question  : user's question
+            org_name  : restrict to a specific club (exact match on org_name)
+            chunk_type: restrict to "profile", "event", or "constitution"
+            top_k     : number of results
         """
         filters = {}
-        if club_name:
-            filters["club_name"] = club_name
-        if max_dues is not None:
-            filters["dues"] = max_dues
+        if org_name:
+            filters["org_name"] = {"$eq": org_name}
+        if chunk_type:
+            filters["chunk_type"] = {"$eq": chunk_type}
 
         print(f"\n🔍 Query with filters: {filters}")
 
