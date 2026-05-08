@@ -1,90 +1,225 @@
 """
 MSU Club Discovery RAG Assistant - Streamlit Web App
-Interactive interface for students to discover MSU clubs
 """
 
 import sys
-
 if 'readline' not in sys.modules:
     import types
-    readline_module = types.ModuleType('readline')
-    sys.modules['readline'] = readline_module
+    sys.modules['readline'] = types.ModuleType('readline')
 
 import streamlit as st
 from pathlib import Path
-
 sys.path.append(str(Path(__file__).parent))
 
 from src.rag_engine import RAGEngine
 import config
 
-
 # ============================================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================================
 st.set_page_config(
-    page_title="MSU Club Discovery Assistant",
+    page_title="MSU Club Discovery",
     page_icon="🎓",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # ============================================================================
-# GLOBAL CSS — explicit colors so the UI looks right in both light and dark mode
+# CSS
 # ============================================================================
 st.markdown("""
 <style>
-    /* Answer box */
-    .answer-box {
-        background-color: #1e2a1e;
-        color: #e8f5e9;
-        padding: 22px 26px;
-        border-radius: 10px;
-        border-left: 5px solid #4caf50;
-        font-size: 1.02rem;
-        line-height: 1.7;
-    }
+/* ── Hero card ─────────────────────────────────────────────── */
+.hero {
+    background: linear-gradient(135deg, #18453B 0%, #0f2d20 55%, #071510 100%);
+    padding: 40px 36px 18px 36px;
+    border-radius: 16px 16px 0 0;
+    border: 1px solid #2a6645;
+    border-bottom: none;
+    margin-bottom: 0;
+}
+.hero-badge {
+    display: inline-block;
+    background: rgba(76,175,80,0.18);
+    color: #a5d6a7;
+    border: 1px solid rgba(76,175,80,0.35);
+    border-radius: 20px;
+    padding: 3px 14px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+}
+.hero h1 {
+    color: #ffffff;
+    font-size: 2.3rem;
+    font-weight: 800;
+    margin: 0 0 8px 0;
+    letter-spacing: -0.5px;
+}
+.hero p {
+    color: #81c784;
+    font-size: 1.05rem;
+    margin: 0 0 22px 0;
+}
 
-    /* Citation snippet blockquote */
-    .citation-snippet {
-        background-color: #1a1f2e;
-        color: #cdd5e0;
-        border-left: 3px solid #4c8af5;
-        padding: 10px 16px;
-        border-radius: 6px;
-        font-style: italic;
-        font-size: 0.95rem;
-        margin-bottom: 8px;
-    }
+/* ── Search bar ─────────────────────────────────────────────── */
+/* Visually attach input to hero card (no gap, no border-top) */
+div[data-testid="stTextInput"] {
+    background: #0d2118 !important;
+    padding: 0 36px 0 36px !important;
+    border-left: 1px solid #2a6645 !important;
+    border-right: 1px solid #2a6645 !important;
+    margin-top: 0 !important;
+}
+div[data-testid="stTextInput"] input {
+    font-size: 1.08rem !important;
+    padding: 16px 18px !important;
+    border-radius: 10px !important;
+    border: 1.5px solid #2e7d52 !important;
+    background-color: #091a10 !important;
+    color: #e8f5e9 !important;
+    width: 100% !important;
+}
+div[data-testid="stTextInput"] input:focus {
+    border-color: #4caf50 !important;
+    box-shadow: 0 0 0 3px rgba(76,175,80,0.2) !important;
+    outline: none !important;
+}
+div[data-testid="stTextInput"] input::placeholder {
+    color: #3a6649 !important;
+}
+div[data-testid="stTextInput"] label { display: none; }
 
-    /* Metadata pill badges */
-    .meta-badge {
-        display: inline-block;
-        background-color: #263238;
-        color: #b0bec5;
-        border-radius: 12px;
-        padding: 2px 10px;
-        font-size: 0.82rem;
-        margin: 3px 3px 3px 0;
-    }
+/* ── Button row bar ─────────────────────────────────────────── */
+.btn-bar {
+    background: #0d2118;
+    padding: 12px 36px 28px 36px;
+    border-radius: 0 0 16px 16px;
+    border: 1px solid #2a6645;
+    border-top: none;
+    margin-top: 0;
+    margin-bottom: 0;
+}
 
-    /* Section headers */
-    .section-label {
-        color: #90caf9;
-        font-size: 0.78rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.07em;
-        margin-bottom: 2px;
-    }
+/* ── Primary Search button ──────────────────────────────────── */
+div[data-testid="stButton"] button[kind="primary"] {
+    background: linear-gradient(135deg, #2e7d52 0%, #1b5935 100%) !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 0.98rem !important;
+    padding: 10px 0 !important;
+    border-radius: 8px !important;
+    letter-spacing: 0.03em;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+}
+div[data-testid="stButton"] button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #388e5c 0%, #2e7d52 100%) !important;
+    box-shadow: 0 4px 18px rgba(76,175,80,0.3) !important;
+}
 
-    /* Footer */
-    .footer {
-        text-align: center;
-        color: #546e7a;
-        font-size: 0.85rem;
-        padding-top: 12px;
-    }
+/* ── Examples section ───────────────────────────────────────── */
+.examples-wrap {
+    background: linear-gradient(180deg, #0b1e14 0%, #081409 100%);
+    border: 1px solid #1a3d28;
+    border-radius: 12px;
+    padding: 20px 24px 12px 24px;
+    margin-top: 20px;
+}
+.examples-label {
+    color: #66bb6a;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 12px;
+}
+
+/* Style example buttons as subtle chips */
+div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button[kind="secondary"] {
+    background-color: rgba(255,255,255,0.04) !important;
+    border: 1px solid #2a5c3a !important;
+    color: #a5d6a7 !important;
+    border-radius: 8px !important;
+    font-size: 0.88rem !important;
+    padding: 9px 12px !important;
+    transition: all 0.15s ease;
+    text-align: left !important;
+}
+div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button[kind="secondary"]:hover {
+    background-color: rgba(76,175,80,0.1) !important;
+    border-color: #4caf50 !important;
+    color: #e8f5e9 !important;
+}
+
+/* ── Answer box ─────────────────────────────────────────────── */
+.answer-box {
+    background: linear-gradient(135deg, #0f2a1c 0%, #091a10 100%);
+    color: #e8f5e9;
+    padding: 26px 30px;
+    border-radius: 12px;
+    border: 1px solid #2a6645;
+    border-left: 5px solid #4caf50;
+    font-size: 1.04rem;
+    line-height: 1.75;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+/* ── Citation snippet ───────────────────────────────────────── */
+.citation-snippet {
+    background: #0d1b26;
+    color: #b0bec5;
+    border-left: 3px solid #42a5f5;
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-style: italic;
+    font-size: 0.94rem;
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+/* ── Meta badges ────────────────────────────────────────────── */
+.meta-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.06);
+    color: #90a4ae;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-size: 0.8rem;
+    margin: 3px 4px 3px 0;
+}
+
+/* ── Results divider accent ─────────────────────────────────── */
+.results-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 28px 0 14px 0;
+}
+.results-header-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #2e7d52, transparent);
+}
+.results-header-text {
+    color: #66bb6a;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+.footer {
+    text-align: center;
+    color: #37474f;
+    font-size: 0.82rem;
+    padding: 16px 0 4px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,7 +247,7 @@ def render_sidebar():
         "Show results from",
         options=["All", "profile", "event", "constitution"],
         index=0,
-        help="Profile = general info | Event = club events | Constitution = bylaws"
+        help="Profile = general info | Event = club events | Constitution = bylaws",
     )
 
     st.sidebar.subheader("Specific Club")
@@ -124,9 +259,9 @@ def render_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Settings")
     top_k = st.sidebar.slider(
-        "Sources to retrieve",
-        min_value=1, max_value=10, value=config.TOP_K_RESULTS,
-        help="More sources = broader but slower"
+        "Sources to retrieve", min_value=1, max_value=10,
+        value=config.TOP_K_RESULTS,
+        help="More sources = broader but slower",
     )
 
     st.sidebar.markdown("---")
@@ -147,60 +282,64 @@ def render_sidebar():
 # MAIN
 # ============================================================================
 def main():
-    st.title("MSU Club Discovery Assistant")
-    st.markdown(
-        "Ask anything about Michigan State University student clubs and organizations. "
-        "Answers are grounded in real club data with citations."
-    )
-
     rag_engine, error = initialize_rag_engine()
 
     if error:
-        st.error(f"Failed to initialize RAG engine: {error}")
-        st.markdown("""
-        **Setup checklist:**
-        1. Copy `.env.example` to `.env`
-        2. Set `PINECONE_API_KEY` and `GROQ_API_KEY`
-        3. Restart the app
-        """)
+        st.error(f"Failed to initialize: {error}")
         return
 
     filters = render_sidebar()
 
-    # ── Example questions ───────────────────────────────────────────────────
-    st.markdown("#### Try an example")
-    examples = [
-        "What clubs are good for beginners?",
-        "Which clubs have low or no dues?",
-        "Tell me about the Accessibility Club",
-    ]
-    cols = st.columns(len(examples))
-    for col, q in zip(cols, examples):
-        if col.button(q, use_container_width=True):
-            st.session_state.current_question = q
-
-    st.markdown("---")
-
-    # ── Query input ─────────────────────────────────────────────────────────
-    st.markdown("#### Ask your question")
+    # ── Hero + search ────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="hero">
+        <div class="hero-badge">1,400+ MSU Student Organizations</div>
+        <h1>MSU Club Discovery</h1>
+        <p>Ask anything. Get instant answers grounded in real club data.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
     if "current_question" not in st.session_state:
         st.session_state.current_question = ""
 
     query = st.text_input(
-        "Question",
+        "search",
         value=st.session_state.current_question,
-        placeholder="e.g. What clubs meet on weekends? What is the purpose of the Robotics Club?",
+        placeholder="e.g.  What clubs are good for networking?  Which clubs have no dues?",
         label_visibility="collapsed",
     )
 
-    c1, c2, _ = st.columns([1, 1, 5])
+    st.markdown("<div class='btn-bar'>", unsafe_allow_html=True)
+    c1, c2, _ = st.columns([1, 1, 6])
     search_clicked = c1.button("Search", type="primary", use_container_width=True)
     if c2.button("Clear", use_container_width=True):
         st.session_state.current_question = ""
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Process query ────────────────────────────────────────────────────────
+    # ── Examples ─────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="examples-wrap">
+        <div class="examples-label">Quick examples — click to search</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    examples = [
+        "What clubs are good for beginners?",
+        "Which clubs have low or no dues?",
+        "Tell me about the Accessibility Club",
+        "Are there any cultural or international clubs?",
+        "What engineering clubs are at MSU?",
+        "Which clubs do community service?",
+    ]
+    row1 = st.columns(3)
+    row2 = st.columns(3)
+    for col, q in zip(row1 + row2, examples):
+        if col.button(q, use_container_width=True):
+            st.session_state.current_question = q
+            st.rerun()
+
+    # ── Query execution ───────────────────────────────────────────────────────
     if search_clicked and query:
         with st.spinner("Searching knowledge base..."):
             if filters["org_name"] or filters["chunk_type"]:
@@ -219,8 +358,14 @@ def main():
                 )
 
         # ── Answer ──────────────────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("#### Answer")
+        st.markdown("""
+        <div class="results-header">
+            <div class="results-header-line"></div>
+            <div class="results-header-text">Answer</div>
+            <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
         st.markdown(
             f"<div class='answer-box'>{response['answer']}</div>",
             unsafe_allow_html=True,
@@ -228,45 +373,47 @@ def main():
 
         # ── Citations ────────────────────────────────────────────────────────
         if response.get("citations"):
-            st.markdown("---")
-            st.markdown("#### Sources")
+            st.markdown("""
+            <div class="results-header" style="margin-top:24px;">
+                <div class="results-header-line"></div>
+                <div class="results-header-text">Sources</div>
+                <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
+            </div>
+            """, unsafe_allow_html=True)
 
             for cite in response["citations"]:
                 meta = cite.get("metadata", {})
                 label = (
-                    f"[{cite['source_number']}]  {cite['org_name']}  ·  "
-                    f"{cite['chunk_type']}  ·  {cite['relevance_score']:.0%} match"
+                    f"[{cite['source_number']}]  {cite['org_name']}"
+                    f"  ·  {cite['chunk_type']}"
+                    f"  ·  {cite['relevance_score']:.0%} match"
                 )
                 with st.expander(label):
                     st.markdown(
                         f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
                         unsafe_allow_html=True,
                     )
-
                     badges = []
                     if meta.get("contact_email"):
                         badges.append(f"✉ {meta['contact_email']}")
                     if meta.get("contact_website"):
                         badges.append(f"🌐 {meta['contact_website']}")
                     if meta.get("org_url"):
-                        badges.append(f"🔗 CampusLabs")
+                        badges.append("🔗 CampusLabs page")
                     if meta.get("categories"):
                         cats = meta["categories"]
                         if isinstance(cats, list):
                             cats = " · ".join(cats)
                         badges.append(f"🏷 {cats}")
-
                     if badges:
-                        html = " ".join(
-                            f"<span class='meta-badge'>{b}</span>" for b in badges
+                        st.markdown(
+                            " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
+                            unsafe_allow_html=True,
                         )
-                        st.markdown(html, unsafe_allow_html=True)
 
-        # ── Applied filters notice ───────────────────────────────────────────
         if response.get("filters_applied"):
             st.info(f"Filters applied: {response['filters_applied']}")
 
-        # ── Debug ────────────────────────────────────────────────────────────
         with st.expander("Debug info"):
             st.json({
                 "chunks_retrieved": len(response.get("retrieved_chunks", [])),
@@ -277,10 +424,9 @@ def main():
     elif search_clicked and not query:
         st.warning("Please enter a question first.")
 
-    # ── Footer ───────────────────────────────────────────────────────────────
-    st.markdown("---")
+    # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
-        "<div class='footer'>MSU Club Discovery · Pinecone + Groq/Llama 3.3 + Streamlit</div>",
+        "<div class='footer'>MSU Club Discovery &nbsp;·&nbsp; Pinecone + Groq/Llama 3.3 + Streamlit</div>",
         unsafe_allow_html=True,
     )
 
