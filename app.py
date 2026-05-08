@@ -65,13 +65,14 @@ st.markdown("""
 }
 
 /* ── Search bar ─────────────────────────────────────────────── */
-/* Visually attach input to hero card (no gap, no border-top) */
+/* Visually attach input to hero card — negative margins close Streamlit's flex gap */
 div[data-testid="stTextInput"] {
     background: #0d2118 !important;
-    padding: 0 36px 0 36px !important;
+    padding: 12px 36px 12px 36px !important;
     border-left: 1px solid #2a6645 !important;
     border-right: 1px solid #2a6645 !important;
-    margin-top: 0 !important;
+    margin-top: -1rem !important;
+    margin-bottom: -1rem !important;
 }
 div[data-testid="stTextInput"] input {
     font-size: 1.08rem !important;
@@ -301,6 +302,8 @@ def main():
 
     if "current_question" not in st.session_state:
         st.session_state.current_question = ""
+    if "has_result" not in st.session_state:
+        st.session_state.has_result = False
 
     query = st.text_input(
         "search",
@@ -314,33 +317,32 @@ def main():
     search_clicked = c1.button("Search", type="primary", use_container_width=True)
     if c2.button("Clear", use_container_width=True):
         st.session_state.current_question = ""
+        st.session_state.has_result = False
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── Examples ─────────────────────────────────────────────────────────────
-    st.markdown("""
-    <div class="examples-wrap">
-        <div class="examples-label">Quick examples — click to search</div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ── Examples (hidden once a result is showing) ────────────────────────────
+    if not st.session_state.has_result:
+        st.markdown("""
+        <div class="examples-wrap">
+            <div class="examples-label">Quick examples — click to search</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    examples = [
-        "What clubs are good for beginners?",
-        "Which clubs have low or no dues?",
-        "Tell me about the Accessibility Club",
-        "Are there any cultural or international clubs?",
-        "What engineering clubs are at MSU?",
-        "Which clubs do community service?",
-    ]
-    row1 = st.columns(3)
-    row2 = st.columns(3)
-    for col, q in zip(row1 + row2, examples):
-        if col.button(q, use_container_width=True):
-            st.session_state.current_question = q
-            st.rerun()
+        examples = [
+            "What clubs are good for beginners?",
+            "Which clubs have low or no dues?",
+            "Tell me about the Accessibility Club",
+        ]
+        cols = st.columns(3)
+        for col, q in zip(cols, examples):
+            if col.button(q, use_container_width=True):
+                st.session_state.current_question = q
+                st.rerun()
 
     # ── Query execution ───────────────────────────────────────────────────────
     if search_clicked and query:
+        st.session_state.has_result = True
         with st.spinner("Searching knowledge base..."):
             if filters["org_name"] or filters["chunk_type"]:
                 response = rag_engine.query_with_metadata_filter(
