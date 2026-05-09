@@ -214,6 +214,20 @@ div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button[kind="se
     white-space: nowrap;
 }
 
+/* ── Vibe badge ─────────────────────────────────────────────── */
+.vibe-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+    border: 1px solid;
+}
+
 /* ── Footer ─────────────────────────────────────────────────── */
 .footer {
     text-align: center;
@@ -258,6 +272,21 @@ def render_sidebar():
         org_name = st.sidebar.text_input("Club name (exact match)")
 
     st.sidebar.markdown("---")
+    st.sidebar.subheader("Response Vibe")
+    vibe_options = {
+        "🎓 Scholar Mode": "scholar",
+        "🤝 Spartan Buddy": "buddy",
+        "🔥 No Filter Spartan": "nofilter",
+    }
+    vibe_label = st.sidebar.radio(
+        "Pick a vibe",
+        list(vibe_options.keys()),
+        index=0,
+        label_visibility="collapsed",
+    )
+    vibe = vibe_options[vibe_label]
+
+    st.sidebar.markdown("---")
     st.sidebar.subheader("Settings")
     top_k = st.sidebar.slider(
         "Sources to retrieve", min_value=1, max_value=10,
@@ -276,6 +305,7 @@ def render_sidebar():
         "chunk_type": chunk_type if chunk_type != "All" else None,
         "org_name": org_name if org_name else None,
         "top_k": top_k,
+        "vibe": vibe,
     }
 
 
@@ -340,6 +370,12 @@ def main():
                 st.session_state.current_question = q
                 st.rerun()
 
+    VIBE_META = {
+        "scholar":  {"icon": "🎓", "label": "Scholar Mode",      "color": "#42a5f5"},
+        "buddy":    {"icon": "🤝", "label": "Spartan Buddy",     "color": "#66bb6a"},
+        "nofilter": {"icon": "🔥", "label": "No Filter Spartan", "color": "#ffa726"},
+    }
+
     # ── Query execution ───────────────────────────────────────────────────────
     if search_clicked and query:
         st.session_state.has_result = True
@@ -350,6 +386,7 @@ def main():
                     org_name=filters["org_name"],
                     chunk_type=filters["chunk_type"],
                     top_k=filters["top_k"],
+                    vibe=filters["vibe"],
                 )
             else:
                 response = rag_engine.query(
@@ -357,6 +394,7 @@ def main():
                     top_k=filters["top_k"],
                     apply_filters=True,
                     return_citations=True,
+                    vibe=filters["vibe"],
                 )
 
         # ── Answer ──────────────────────────────────────────────────────────
@@ -367,6 +405,14 @@ def main():
             <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
         </div>
         """, unsafe_allow_html=True)
+
+        vibe_key = filters["vibe"]
+        vm = VIBE_META[vibe_key]
+        st.markdown(
+            f"<div class='vibe-badge' style='color:{vm['color']};border-color:{vm['color']};background:rgba(0,0,0,0.25);'>"
+            f"{vm['icon']} {vm['label']}</div>",
+            unsafe_allow_html=True,
+        )
 
         st.markdown(
             f"<div class='answer-box'>{response['answer']}</div>",

@@ -98,14 +98,9 @@ class RAGEngine:
 
         return filters
 
-    def _build_system_prompt(self) -> str:
-        """
-        Build system prompt for LLM
-
-        Returns:
-            System prompt string
-        """
-        return """You are a helpful assistant for Michigan State University (MSU) students looking for student clubs and organizations.
+    def _build_system_prompt(self, vibe: str = "scholar") -> str:
+        prompts = {
+            "scholar": """You are a helpful assistant for Michigan State University (MSU) students looking for student clubs and organizations.
 
 Your role is to:
 1. Answer questions about MSU student clubs based ONLY on the provided context
@@ -115,7 +110,33 @@ Your role is to:
 5. Be concise but informative
 6. If asked about fit/recommendations, consider the student's stated preferences and constraints
 
-Remember: Only use information from the provided context. Do not make up information."""
+Remember: Only use information from the provided context. Do not make up information.""",
+
+            "buddy": """You're a chill MSU senior who knows the club scene inside and out. A first-year just texted you asking about clubs — answer like you're actually their friend, not a campus directory.
+
+Your style:
+- Casual and warm. Use "you", "yeah", "honestly", "tbh" naturally — don't force it.
+- Light humor is welcome, never sarcastic or dismissive.
+- Read between the lines. If someone asks "what clubs have no dues?", they probably need to watch their budget — acknowledge that without making it weird.
+- Lead with the useful stuff. Don't bury the answer in a long intro.
+- Still cite sources with [Source X] — just weave them in naturally ("Source 2 mentions they meet Tuesdays at 7pm, which is pretty reasonable").
+- If the context doesn't have the answer, be real about it: "Honestly I couldn't find much on that, you'd probably want to reach out to them directly."
+
+Remember: Only use information from the provided context. Do not make up information.""",
+
+            "nofilter": """You're an MSU student giving your honest, unfiltered take on clubs to a friend. You actually get what people are really asking — they join clubs to meet people, have fun, build a social life, or figure out their career path. You don't pretend otherwise.
+
+Your style:
+- Full gen-Z energy. Real talk. You can say things like "ngl", "lowkey", "not gonna lie this one sounds like a vibe", "if you wanna actually meet people this is the move".
+- Acknowledge the real human motivation behind questions. If someone asks about networking clubs, you get they're trying to get ahead. If they ask about social clubs, you understand they want to meet people — lean into it.
+- Be direct, even a little spicy. "This one seems lowkey underfunded based on the info" is fine if the context supports it.
+- Still helpful and accurate. Cite sources with [Source X] naturally. Personality carries the info, it doesn't replace it.
+- Never objectifying, never creepy, never pressure-y. You're being real, not inappropriate.
+- If context doesn't cover it: "bro the data doesn't say, you'd have to hit them up directly"
+
+Remember: Only use information from the provided context. Do not make up information.""",
+        }
+        return prompts.get(vibe, prompts["scholar"])
 
     def _build_user_prompt(self, query: str, context: str) -> str:
         """
@@ -140,7 +161,8 @@ Please answer the question based on the context above. Cite your sources using [
         question: str,
         top_k: int = None,
         apply_filters: bool = True,
-        return_citations: bool = True
+        return_citations: bool = True,
+        vibe: str = "scholar"
     ) -> Dict:
         """
         Main RAG query method: retrieve relevant chunks and generate answer
@@ -189,7 +211,7 @@ Please answer the question based on the context above. Cite your sources using [
         context, citations = self._build_context_from_chunks(chunks)
 
         # Step 4: Generate answer using LLM
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(vibe)
         user_prompt = self._build_user_prompt(question, context)
 
         print(f"   🤖 Generating answer with {config.LLM_PROVIDER}...")
@@ -220,7 +242,8 @@ Please answer the question based on the context above. Cite your sources using [
         question: str,
         org_name: str = None,
         chunk_type: str = None,
-        top_k: int = None
+        top_k: int = None,
+        vibe: str = "scholar"
     ) -> Dict:
         """
         Query with explicit metadata filters.
@@ -257,7 +280,7 @@ Please answer the question based on the context above. Cite your sources using [
 
         # Build context and generate answer
         context, citations = self._build_context_from_chunks(chunks)
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(vibe)
         user_prompt = self._build_user_prompt(question, context)
 
         answer = self.llm_client.generate(
