@@ -480,3 +480,46 @@ traffic, you'd need a paid API. The provider abstraction makes swapping easy.
 Pinecone hosted inference: no GPU, no model management, but adds API latency and uses
 credits. For this project (1,400 clubs, one-time batch ingestion), hosted is the right
 trade-off. For high-throughput ingestion at scale, a local model would be faster.
+
+---
+
+## Enhancement Log
+
+### 2026-05-08 — Vibe Selector (Prompt Personalization)
+
+**What was built**
+
+A mood toggle in the sidebar with 3 options that change how the LLM responds. Same vector retrieval, same citations, different system prompt personality.
+
+The 3 vibes:
+- 🎓 Scholar Mode — formal, thorough, always cites (original behavior, unchanged)
+- 🤝 Spartan Buddy — chill upperclassman energy, casual, reads between the lines
+- 🔥 No Filter Spartan — gen-Z energy, acknowledges the real human motivation behind questions, direct
+
+**How it works (pseudo-code)**
+
+```
+sidebar radio → vibe key ("scholar" | "buddy" | "nofilter")
+       ↓
+render_sidebar() returns vibe in filters dict
+       ↓
+app.py passes vibe= to rag_engine.query()
+       ↓
+_build_system_prompt(vibe) returns one of 3 system prompt strings
+       ↓
+LLM.generate(user_prompt, system_prompt=vibe_prompt)
+       ↓
+answer displayed + small personality badge shown above answer box
+```
+
+**Files changed**
+- `src/rag_engine.py`: `_build_system_prompt()` now takes `vibe: str = "scholar"`. Both `query()` and `query_with_metadata_filter()` accept and forward `vibe`.
+- `app.py`: `st.radio` in sidebar for vibe selection, `vibe` passed through filters dict to query calls, `VIBE_META` dict drives a colored personality badge rendered above the answer.
+
+**Key insight**
+
+Retrieval is completely vibe-agnostic — the same Pinecone vector search runs regardless of mode. Only the system prompt string changes. This means zero extra latency, zero extra API calls. Personality is just a string you hand to the LLM.
+
+**Trade-off to know**
+
+"No Filter Spartan" has the most personality but is also the hardest prompt to control precisely — edge cases or ambiguous questions may need prompt tuning over time. Scholar Mode is the safest for accuracy-critical use.
