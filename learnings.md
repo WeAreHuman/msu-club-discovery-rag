@@ -576,3 +576,40 @@ Context is injected only in the current user message. Prior user messages in his
 **Trade-off to know**
 
 History grows indefinitely during a session — no trimming. For very long conversations the prompt could exceed the model's context window. For a student project this is fine (sessions are short). In production, you'd trim to the last N turns or summarize old turns.
+
+---
+
+### 2026-05-14 — Empathetic Follow-up Suggestions + Sidebar Cleanup
+
+**What was built**
+
+Two improvements in one pass.
+
+**1. Empathetic follow-up at the end of every response**
+
+The problem: when a user asks something vague like "clubs for beginners", the RAG engine returns whatever chunks match — but it has no way of knowing what the user actually means by beginner-friendly (no dues? no experience required? casual time commitment? a specific domain like coding or art?). Without context, the retrieval stays generic.
+
+The fix: updated all three system prompts in `_build_system_prompt()` to instruct the LLM to end every answer with one natural, empathetic follow-up question. The question is meant to draw out details that would make the next query more precise — things like area of interest, schedule, budget, or what a vague word means to them.
+
+Each vibe gets a follow-up instruction that fits its tone:
+- Scholar Mode: formal phrasing, asks for domain/preferences
+- Spartan Buddy: casual, "like texting a friend" style
+- No Filter: punchy, direct — "what's your major tho?"
+
+Why one question only: multiple questions feels like a form. One question feels like a conversation.
+
+Why in the system prompt and not injected post-hoc in app.py: keeping it in the prompt means the follow-up is aware of what was just said and can ask something genuinely relevant, not a generic template tacked on.
+
+**2. Sidebar cleanup**
+
+- Moved "New Chat" button to the very top of the sidebar and styled it as a primary button so it's always visible and easy to hit
+- Removed emojis from the response style radio options (was "🎓 Scholar Mode", "🤝 Spartan Buddy", "🔥 No Filter Spartan") — labels are now plain text: "Scholar Mode", "Spartan Buddy", "No Filter"
+- Renamed "Response Vibe" subheader to "Response Style" — slightly more neutral
+- Collapsed "Content Type" and "Specific Club" filters under a single "Filters" subheader to reduce visual noise
+- Removed the separate "Settings" subheader — the sources slider now stands alone with its label
+
+Vibe badge icons inside the chat (the colored pill shown above each answer) are unchanged — those are visual indicators for the user, not labels, so they're fine.
+
+**Files changed**
+- `src/rag_engine.py`: Updated all three system prompt strings in `_build_system_prompt()` to include a follow-up instruction block at the end of each
+- `app.py`: Rewrote `render_sidebar()` — New Chat at top, removed emojis from radio keys, consolidated filter subheaders

@@ -204,28 +204,17 @@ VIBE_META = {
 # SIDEBAR
 # ============================================================================
 def render_sidebar():
-    st.sidebar.title("Search Filters")
-
-    st.sidebar.subheader("Content Type")
-    chunk_type = st.sidebar.selectbox(
-        "Show results from",
-        options=["All", "profile", "event", "constitution"],
-        index=0,
-        help="Profile = general info | Event = club events | Constitution = bylaws",
-    )
-
-    st.sidebar.subheader("Specific Club")
-    enable_club_filter = st.sidebar.checkbox("Filter by club name", value=False)
-    org_name = None
-    if enable_club_filter:
-        org_name = st.sidebar.text_input("Club name (exact match)")
+    if st.sidebar.button("New Chat", use_container_width=True, type="primary"):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Response Vibe")
+    st.sidebar.subheader("Response Style")
     vibe_options = {
-        "🎓 Scholar Mode": "scholar",
-        "🤝 Spartan Buddy": "buddy",
-        "🔥 No Filter Spartan": "nofilter",
+        "Scholar Mode": "scholar",
+        "Spartan Buddy": "buddy",
+        "No Filter": "nofilter",
     }
     vibe_label = st.sidebar.radio(
         "Pick a vibe",
@@ -236,18 +225,25 @@ def render_sidebar():
     vibe = vibe_options[vibe_label]
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Settings")
+    st.sidebar.subheader("Filters")
+    chunk_type = st.sidebar.selectbox(
+        "Content type",
+        options=["All", "profile", "event", "constitution"],
+        index=0,
+        help="Profile = general info | Event = club events | Constitution = bylaws",
+    )
+
+    enable_club_filter = st.sidebar.checkbox("Filter by specific club", value=False)
+    org_name = None
+    if enable_club_filter:
+        org_name = st.sidebar.text_input("Club name (exact match)")
+
+    st.sidebar.markdown("---")
     top_k = st.sidebar.slider(
         "Sources to retrieve", min_value=1, max_value=10,
         value=config.TOP_K_RESULTS,
         help="More sources = broader but slower",
     )
-
-    st.sidebar.markdown("---")
-    if st.sidebar.button("New Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.chat_history = []
-        st.rerun()
 
     st.sidebar.markdown("---")
     st.sidebar.caption(
