@@ -464,11 +464,13 @@ The index is built with `llama-text-embed-v2`. Switching models requires re-inde
 all 48k+ chunks from scratch. Embedding model choice is a consequential upfront decision
 — changing it later is expensive.
 
-### Stateless queries (no conversation memory)
+### Conversation history (multi-turn)
 
-Each query is independent. The LLM sees only the retrieved chunks and the current
-question — not previous turns. This keeps things simple and avoids prompt length
-issues, but means follow-up questions like "tell me more about the first one" won't work.
+Each query now passes prior turns as lightweight conversation history to the LLM.
+The history only contains plain Q&A pairs (raw question text + assistant answer) —
+the retrieved context blob is injected only for the current question. This keeps
+the history payload small while still giving the LLM enough context for follow-ups
+like "tell me more about the first one." See the Enhancement Log for implementation details.
 
 ### Groq free tier
 
@@ -523,3 +525,54 @@ Retrieval is completely vibe-agnostic — the same Pinecone vector search runs r
 **Trade-off to know**
 
 "No Filter Spartan" has the most personality but is also the hardest prompt to control precisely — edge cases or ambiguous questions may need prompt tuning over time. Scholar Mode is the safest for accuracy-critical use.
+
+---
+
+### 2026-05-14 — Multi-turn Chatbot (Conversation Memory)
+
+**What was built**
+
+Converted the app from one-shot Q&A (text input + Search button → single answer) to a persistent chatbot. The user can ask follow-up questions like "how much are their dues?" or "what about that first club?" and the LLM understands the prior context.
+
+**How it works**
+
+Two session-state stores:
+- `messages` — full display state per turn: `{role, content, citations, vibe, num_chunks, filters_applied}`. Used to re-render the full conversation on every Streamlit rerun.
+- `chat_history` — lightweight LLM payload: plain `{role, content}` pairs where the user content is just the raw question (no context blob). Grows by 2 entries per turn.
+
+On each new question:
+```
+User question
+    ↓
+RAGEngine.chat()
+  ├── extract/apply filters (same as before)
+  ├── VectorStore.search() for current question   ← fresh retrieval every turn
+  ├── build context string from top-k chunks
+  ├── messages = chat_history + {"role":"user", "content": context + question}
+  └── LLM.generate_with_history(messages, system_prompt)
+    ↓
+Answer + citations displayed via st.chat_message("assistant")
+chat_history updated with plain Q&A (no context blob in user turn)
+```
+
+Why inject context only for the current question and not prior turns? Because the LLM's prior assistant answers already referenced the retrieved context. Re-injecting old context blobs would balloon the prompt size quadratically. The plain question is enough for the LLM to understand what was asked.
+
+**Files changed**
+- `src/llm_client.py`: Added `generate_with_history(messages, system_prompt, ...)` abstract method + `GroqClient` implementation. Prepends system prompt, then passes the full messages list to the Groq API.
+- `src/rag_engine.py`: Added `RAGEngine.chat()` method. Accepts `conversation_history`, `org_name`, `chunk_type` (explicit filter overrides), and all existing params. Builds LLM messages as `history + current_user_msg_with_context`.
+- `app.py`: Replaced text-input + button pattern with `st.chat_input` + `st.chat_message`. Example chips use `st.session_state.pending_prompt` + `st.rerun()` to feed into the same processing path. "New Chat" button in sidebar resets both session-state stores. `render_assistant_message()` helper renders vibe badge + answer box + citations consistently for both live and history messages.
+
+**Key design decision — where context lives in the message list**
+
+```
+[system prompt]
+[user: "What clubs are good for beginners?"]          ← turn 1 (in history, no context)
+[assistant: "Here are some options: ..."]             ← turn 1
+[user: "Context: [Source 1]...\n\nQuestion: tell me more about the first one"]  ← current turn
+```
+
+Context is injected only in the current user message. Prior user messages in history are just the raw question. This is the right trade-off: the LLM can follow the thread, but history doesn't grow with every set of retrieved chunks.
+
+**Trade-off to know**
+
+History grows indefinitely during a session — no trimming. For very long conversations the prompt could exceed the model's context window. For a student project this is fine (sessions are short). In production, you'd trim to the last N turns or summarize old turns.

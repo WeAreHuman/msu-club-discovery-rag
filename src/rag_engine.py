@@ -248,6 +248,87 @@ Please answer the question based on the context above. Cite your sources using [
 
         return response
 
+    def chat(
+        self,
+        question: str,
+        conversation_history: List[Dict] = None,
+        top_k: int = None,
+        apply_filters: bool = True,
+        return_citations: bool = True,
+        vibe: str = "scholar",
+        org_name: str = None,
+        chunk_type: str = None,
+    ) -> Dict:
+        """
+        Multi-turn RAG query. Retrieves fresh context for the current question
+        and passes prior conversation history to the LLM so it can reference
+        earlier turns.
+
+        Args:
+            question: Current user question
+            conversation_history: Plain [{role, content}] pairs from prior turns
+                                  (user content = raw question, not context-injected)
+            org_name: Optional explicit club filter
+            chunk_type: Optional explicit chunk type filter
+        """
+        print(f"\n🔍 Chat query: '{question}'")
+
+        # Build filters — explicit overrides take priority over auto-extraction
+        filters = {}
+        if org_name:
+            filters["org_name"] = {"$eq": org_name}
+        if chunk_type:
+            filters["chunk_type"] = {"$eq": chunk_type}
+        if not filters and apply_filters:
+            filters = self._extract_filters_from_query(question)
+            if filters:
+                print(f"   📋 Extracted filters: {filters}")
+
+        top_k = top_k or config.TOP_K_RESULTS
+        chunks = self.vector_store.search(
+            query=question,
+            top_k=top_k,
+            filters=filters if filters else None,
+        )
+
+        print(f"   ✓ Retrieved {len(chunks)} relevant chunks")
+
+        if not chunks:
+            return {
+                "answer": "I couldn't find any relevant information in the club database. Try rephrasing or ask about a specific club.",
+                "citations": [],
+                "retrieved_chunks": [],
+                "filters_applied": filters,
+            }
+
+        context, citations = self._build_context_from_chunks(chunks)
+
+        # Build message list: history + current user message with injected context
+        current_user_content = self._build_user_prompt(question, context)
+        messages = list(conversation_history or [])
+        messages.append({"role": "user", "content": current_user_content})
+
+        system_prompt = self._build_system_prompt(vibe)
+        print(f"   🤖 Generating answer with {config.LLM_PROVIDER}...")
+
+        answer = self.llm_client.generate_with_history(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=config.LLM_TEMPERATURE,
+            max_tokens=config.LLM_MAX_TOKENS,
+        )
+
+        print(f"   ✓ Answer generated")
+
+        response = {
+            "answer": answer,
+            "retrieved_chunks": chunks,
+            "filters_applied": filters,
+        }
+        if return_citations:
+            response["citations"] = citations
+        return response
+
     def query_with_metadata_filter(
         self,
         question: str,

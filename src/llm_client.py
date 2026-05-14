@@ -27,11 +27,21 @@ class BaseLLMClient(ABC):
         temperature: float = 0.3,
         max_tokens: int = 1000
     ) -> str:
+        pass
+
+    @abstractmethod
+    def generate_with_history(
+        self,
+        messages: List[Dict],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 1000
+    ) -> str:
         """
-        Generate text response from LLM
+        Generate a response given a full conversation history.
 
         Args:
-            prompt: User prompt/question
+            messages: List of {"role": "user"/"assistant", "content": str} dicts
             system_prompt: Optional system instructions
             temperature: Sampling temperature (0-1)
             max_tokens: Maximum tokens to generate
@@ -109,6 +119,33 @@ class GroqClient(BaseLLMClient):
 
             return response.choices[0].message.content
 
+        except Exception as e:
+            print(f"⚠️  Error calling Groq API: {e}")
+            return f"Error: {str(e)}"
+
+    def generate_with_history(
+        self,
+        messages: List[Dict],
+        system_prompt: Optional[str] = None,
+        temperature: float = None,
+        max_tokens: int = None
+    ) -> str:
+        temperature = temperature if temperature is not None else config.LLM_TEMPERATURE
+        max_tokens = max_tokens or config.LLM_MAX_TOKENS
+
+        full_messages = []
+        if system_prompt:
+            full_messages.append({"role": "system", "content": system_prompt})
+        full_messages.extend(messages)
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=full_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content
         except Exception as e:
             print(f"⚠️  Error calling Groq API: {e}")
             return f"Error: {str(e)}"

@@ -32,11 +32,10 @@ st.markdown("""
 /* ── Hero card ─────────────────────────────────────────────── */
 .hero {
     background: linear-gradient(135deg, #18453B 0%, #0f2d20 55%, #071510 100%);
-    padding: 40px 36px 18px 36px;
-    border-radius: 16px 16px 0 0;
+    padding: 28px 36px 20px 36px;
+    border-radius: 16px;
     border: 1px solid #2a6645;
-    border-bottom: none;
-    margin-bottom: 0;
+    margin-bottom: 20px;
 }
 .hero-badge {
     display: inline-block;
@@ -53,72 +52,15 @@ st.markdown("""
 }
 .hero h1 {
     color: #ffffff;
-    font-size: 2.3rem;
+    font-size: 2.0rem;
     font-weight: 800;
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
     letter-spacing: -0.5px;
 }
 .hero p {
     color: #81c784;
-    font-size: 1.05rem;
-    margin: 0 0 22px 0;
-}
-
-/* ── Search bar ─────────────────────────────────────────────── */
-/* Visually attach input to hero card — negative margins close Streamlit's flex gap */
-div[data-testid="stTextInput"] {
-    background: #0d2118 !important;
-    padding: 12px 36px 12px 36px !important;
-    border-left: 1px solid #2a6645 !important;
-    border-right: 1px solid #2a6645 !important;
-    margin-top: -1rem !important;
-    margin-bottom: -1rem !important;
-}
-div[data-testid="stTextInput"] input {
-    font-size: 1.08rem !important;
-    padding: 16px 18px !important;
-    border-radius: 10px !important;
-    border: 1.5px solid #2e7d52 !important;
-    background-color: #091a10 !important;
-    color: #e8f5e9 !important;
-    width: 100% !important;
-}
-div[data-testid="stTextInput"] input:focus {
-    border-color: #4caf50 !important;
-    box-shadow: 0 0 0 3px rgba(76,175,80,0.2) !important;
-    outline: none !important;
-}
-div[data-testid="stTextInput"] input::placeholder {
-    color: #3a6649 !important;
-}
-div[data-testid="stTextInput"] label { display: none; }
-
-/* ── Button row bar ─────────────────────────────────────────── */
-.btn-bar {
-    background: #0d2118;
-    padding: 12px 36px 28px 36px;
-    border-radius: 0 0 16px 16px;
-    border: 1px solid #2a6645;
-    border-top: none;
-    margin-top: 0;
-    margin-bottom: 0;
-}
-
-/* ── Primary Search button ──────────────────────────────────── */
-div[data-testid="stButton"] button[kind="primary"] {
-    background: linear-gradient(135deg, #2e7d52 0%, #1b5935 100%) !important;
-    border: none !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    font-size: 0.98rem !important;
-    padding: 10px 0 !important;
-    border-radius: 8px !important;
-    letter-spacing: 0.03em;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-}
-div[data-testid="stButton"] button[kind="primary"]:hover {
-    background: linear-gradient(135deg, #388e5c 0%, #2e7d52 100%) !important;
-    box-shadow: 0 4px 18px rgba(76,175,80,0.3) !important;
+    font-size: 1.0rem;
+    margin: 0;
 }
 
 /* ── Examples section ───────────────────────────────────────── */
@@ -251,6 +193,13 @@ def initialize_rag_engine():
         return None, str(e)
 
 
+VIBE_META = {
+    "scholar":  {"icon": "🎓", "label": "Scholar Mode",      "color": "#42a5f5"},
+    "buddy":    {"icon": "🤝", "label": "Spartan Buddy",     "color": "#66bb6a"},
+    "nofilter": {"icon": "🔥", "label": "No Filter Spartan", "color": "#ffa726"},
+}
+
+
 # ============================================================================
 # SIDEBAR
 # ============================================================================
@@ -295,6 +244,12 @@ def render_sidebar():
     )
 
     st.sidebar.markdown("---")
+    if st.sidebar.button("New Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
+
+    st.sidebar.markdown("---")
     st.sidebar.caption(
         f"**LLM**: {config.LLM_PROVIDER.title()} / {config.LLM_MODEL}\n\n"
         f"**Embed**: {config.EMBEDDING_MODEL}\n\n"
@@ -310,6 +265,72 @@ def render_sidebar():
 
 
 # ============================================================================
+# RENDER HELPERS
+# ============================================================================
+def render_citations(citations):
+    st.markdown("""
+    <div class="results-header" style="margin-top:24px;">
+        <div class="results-header-line"></div>
+        <div class="results-header-text">Sources</div>
+        <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    for cite in citations:
+        meta = cite.get("metadata", {})
+        label = (
+            f"[{cite['source_number']}]  {cite['org_name']}"
+            f"  ·  {cite['chunk_type']}"
+            f"  ·  {cite['relevance_score']:.0%} match"
+        )
+        with st.expander(label):
+            st.markdown(
+                f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
+                unsafe_allow_html=True,
+            )
+            badges = []
+            if meta.get("contact_email"):
+                badges.append(f"✉ {meta['contact_email']}")
+            if meta.get("contact_website"):
+                badges.append(f"🌐 {meta['contact_website']}")
+            if meta.get("org_url"):
+                badges.append("🔗 CampusLabs page")
+            if meta.get("categories"):
+                cats = meta["categories"]
+                if isinstance(cats, list):
+                    cats = " · ".join(cats)
+                badges.append(f"🏷 {cats}")
+            if badges:
+                st.markdown(
+                    " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
+                    unsafe_allow_html=True,
+                )
+
+
+def render_assistant_message(msg):
+    vibe_key = msg.get("vibe", "scholar")
+    vm = VIBE_META[vibe_key]
+    st.markdown(
+        f"<div class='vibe-badge' style='color:{vm['color']};border-color:{vm['color']};background:rgba(0,0,0,0.25);'>"
+        f"{vm['icon']} {vm['label']}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div class='answer-box'>{msg['content']}</div>",
+        unsafe_allow_html=True,
+    )
+    if msg.get("citations"):
+        render_citations(msg["citations"])
+    if msg.get("filters_applied"):
+        st.info(f"Filters applied: {msg['filters_applied']}")
+    with st.expander("Debug info"):
+        st.json({
+            "chunks_retrieved": msg.get("num_chunks", 0),
+            "filters_applied": msg.get("filters_applied", {}),
+        })
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 def main():
@@ -321,38 +342,25 @@ def main():
 
     filters = render_sidebar()
 
-    # ── Hero + search ────────────────────────────────────────────────────────
+    # ── Session state ────────────────────────────────────────────────────────
+    # messages: full display state — {role, content, citations, vibe, ...}
+    # chat_history: plain {role, content} pairs passed to the LLM each turn
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # ── Hero ─────────────────────────────────────────────────────────────────
     st.markdown("""
     <div class="hero">
         <div class="hero-badge">1,400+ MSU Student Organizations</div>
         <h1>MSU Club Discovery</h1>
-        <p>Ask anything. Get instant answers grounded in real club data.</p>
+        <p>Ask anything — I remember what we've talked about.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    if "current_question" not in st.session_state:
-        st.session_state.current_question = ""
-    if "has_result" not in st.session_state:
-        st.session_state.has_result = False
-
-    query = st.text_input(
-        "search",
-        value=st.session_state.current_question,
-        placeholder="e.g.  What clubs are good for networking?  Which clubs have no dues?",
-        label_visibility="collapsed",
-    )
-
-    st.markdown("<div class='btn-bar'>", unsafe_allow_html=True)
-    c1, c2, _ = st.columns([1, 1, 6])
-    search_clicked = c1.button("Search", type="primary", use_container_width=True)
-    if c2.button("Clear", use_container_width=True):
-        st.session_state.current_question = ""
-        st.session_state.has_result = False
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # ── Examples (hidden once a result is showing) ────────────────────────────
-    if not st.session_state.has_result:
+    # ── Examples (shown only when chat is empty) ──────────────────────────────
+    if not st.session_state.messages:
         st.markdown("""
         <div class="examples-wrap">
             <div class="examples-label">Quick examples — click to search</div>
@@ -367,110 +375,58 @@ def main():
         cols = st.columns(3)
         for col, q in zip(cols, examples):
             if col.button(q, use_container_width=True):
-                st.session_state.current_question = q
+                st.session_state.pending_prompt = q
                 st.rerun()
 
-    VIBE_META = {
-        "scholar":  {"icon": "🎓", "label": "Scholar Mode",      "color": "#42a5f5"},
-        "buddy":    {"icon": "🤝", "label": "Spartan Buddy",     "color": "#66bb6a"},
-        "nofilter": {"icon": "🔥", "label": "No Filter Spartan", "color": "#ffa726"},
-    }
-
-    # ── Query execution ───────────────────────────────────────────────────────
-    if search_clicked and query:
-        st.session_state.has_result = True
-        with st.spinner("Searching knowledge base..."):
-            if filters["org_name"] or filters["chunk_type"]:
-                response = rag_engine.query_with_metadata_filter(
-                    question=query,
-                    org_name=filters["org_name"],
-                    chunk_type=filters["chunk_type"],
-                    top_k=filters["top_k"],
-                    vibe=filters["vibe"],
-                )
+    # ── Render conversation history ───────────────────────────────────────────
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            if msg["role"] == "user":
+                st.markdown(msg["content"])
             else:
-                response = rag_engine.query(
-                    question=query,
+                render_assistant_message(msg)
+
+    # ── Get new input (chat box or example chip) ──────────────────────────────
+    prompt = st.session_state.pop("pending_prompt", None)
+    chat_input = st.chat_input("Ask about MSU clubs...")
+    if chat_input:
+        prompt = chat_input
+
+    # ── Process prompt ────────────────────────────────────────────────────────
+    if prompt:
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Searching knowledge base..."):
+                response = rag_engine.chat(
+                    question=prompt,
+                    conversation_history=st.session_state.chat_history,
                     top_k=filters["top_k"],
                     apply_filters=True,
                     return_citations=True,
                     vibe=filters["vibe"],
+                    org_name=filters["org_name"],
+                    chunk_type=filters["chunk_type"],
                 )
 
-        # ── Answer ──────────────────────────────────────────────────────────
-        st.markdown("""
-        <div class="results-header">
-            <div class="results-header-line"></div>
-            <div class="results-header-text">Answer</div>
-            <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        vibe_key = filters["vibe"]
-        vm = VIBE_META[vibe_key]
-        st.markdown(
-            f"<div class='vibe-badge' style='color:{vm['color']};border-color:{vm['color']};background:rgba(0,0,0,0.25);'>"
-            f"{vm['icon']} {vm['label']}</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f"<div class='answer-box'>{response['answer']}</div>",
-            unsafe_allow_html=True,
-        )
-
-        # ── Citations ────────────────────────────────────────────────────────
-        if response.get("citations"):
-            st.markdown("""
-            <div class="results-header" style="margin-top:24px;">
-                <div class="results-header-line"></div>
-                <div class="results-header-text">Sources</div>
-                <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            for cite in response["citations"]:
-                meta = cite.get("metadata", {})
-                label = (
-                    f"[{cite['source_number']}]  {cite['org_name']}"
-                    f"  ·  {cite['chunk_type']}"
-                    f"  ·  {cite['relevance_score']:.0%} match"
-                )
-                with st.expander(label):
-                    st.markdown(
-                        f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
-                        unsafe_allow_html=True,
-                    )
-                    badges = []
-                    if meta.get("contact_email"):
-                        badges.append(f"✉ {meta['contact_email']}")
-                    if meta.get("contact_website"):
-                        badges.append(f"🌐 {meta['contact_website']}")
-                    if meta.get("org_url"):
-                        badges.append("🔗 CampusLabs page")
-                    if meta.get("categories"):
-                        cats = meta["categories"]
-                        if isinstance(cats, list):
-                            cats = " · ".join(cats)
-                        badges.append(f"🏷 {cats}")
-                    if badges:
-                        st.markdown(
-                            " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
-                            unsafe_allow_html=True,
-                        )
-
-        if response.get("filters_applied"):
-            st.info(f"Filters applied: {response['filters_applied']}")
-
-        with st.expander("Debug info"):
-            st.json({
-                "chunks_retrieved": len(response.get("retrieved_chunks", [])),
+            assistant_msg = {
+                "role": "assistant",
+                "content": response["answer"],
+                "citations": response.get("citations", []),
                 "filters_applied": response.get("filters_applied", {}),
-                "top_k": filters["top_k"],
-            })
+                "vibe": filters["vibe"],
+                "num_chunks": len(response.get("retrieved_chunks", [])),
+            }
+            render_assistant_message(assistant_msg)
 
-    elif search_clicked and not query:
-        st.warning("Please enter a question first.")
+        # Persist to session state
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append(assistant_msg)
+
+        # LLM history uses plain question/answer — no context blob in user turn
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        st.session_state.chat_history.append({"role": "assistant", "content": response["answer"]})
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
