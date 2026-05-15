@@ -761,3 +761,57 @@ HuggingFace `all-MiniLM-L6-v2` is a much smaller embedding model than OpenAI's
 `text-embedding-3-small`. Answer Relevancy scores may differ from what you'd get with
 the OpenAI embeddings — scores across runs are still comparable to each other as long as
 the same embedding model is used consistently.
+
+---
+
+### 2026-05-15 — Query Rewriting for Multi-turn Retrieval
+
+**What was built**
+
+Added `_rewrite_query()` to `RAGEngine`. When `chat()` is called with non-empty
+`conversation_history`, the current question is first rewritten into a standalone
+search query before hitting Pinecone. The original question is still used for the
+final LLM answer generation.
+
+**The problem it solves**
+
+Multi-turn follow-ups like "tell me more about the first one" or "what about their
+dues?" contain pronouns and references that make no sense as a vector search query.
+The embedding of "tell me more about it" has no semantic overlap with club data —
+retrieval returns garbage. Rewriting resolves those references into explicit terms
+before search.
+
+**How it works**
+
+```
+conversation_history + current question
+         ↓
+_rewrite_query()  ←  LLM call (temp=0, max_tokens=80)
+         ↓
+standalone search query (e.g. "Robotics Club weekly meeting schedule")
+         ↓
+Pinecone search with rewritten query
+         ↓
+retrieved chunks + conversation_history + original question
+         ↓
+LLM generates final answer
+```
+
+**Key design decisions**
+
+- Rewrite only when history exists. First-turn queries are always self-contained —
+  calling the LLM to rewrite them is a wasted API call.
+- Last 4 messages (2 turns) only. Enough to resolve any reference a user would
+  make; full history adds noise without improving the rewrite.
+- `temperature=0.0, max_tokens=80`. Rewriting is extraction, not generation. It
+  should be deterministic and fast.
+- Rewritten query → Pinecone only. The final LLM call still receives the original
+  question so the answer sounds natural ("you asked about their dues" not "you asked
+  about Robotics Club membership fees as rephrased").
+- Filters run against the rewritten query. "what about their events?" →
+  "Robotics Club events" → `chunk_type: event` filter fires correctly.
+
+**Files changed**
+
+- `src/rag_engine.py`: added `_rewrite_query()` method; updated `chat()` to call it
+  and use the result as `search_query` for Pinecone, keeping `question` for the LLM prompt

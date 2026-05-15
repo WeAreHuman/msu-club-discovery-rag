@@ -61,10 +61,12 @@ VectorStore.upsert_chunks()  →  Pinecone (llama-text-embed-v2, 1024 dims)
 User message
     ↓
 RAGEngine.chat(question, conversation_history)
-  ├── _extract_filters_from_query()   ← keyword-based, steers to event chunks
-  ├── VectorStore.search()            ← embed query via Pinecone inference API, cosine search
+  ├── _rewrite_query()                ← LLM rewrites follow-ups into standalone search queries
+  │                                      (skipped on first turn; uses last 4 messages only)
+  ├── _extract_filters_from_query()   ← keyword-based, runs on rewritten query
+  ├── VectorStore.search()            ← embed rewritten query via Pinecone inference API
   ├── _build_context_from_chunks()    ← formats [Source N] strings + citation dicts
-  ├── messages = chat_history + current user message with injected context
+  ├── messages = chat_history + current user message (original question) with injected context
   └── LLM.generate_with_history(messages, system_prompt)
     ↓
 Answer + citations + follow-up suggestion → Streamlit chat UI
@@ -79,6 +81,8 @@ Answer + citations + follow-up suggestion → Streamlit chat UI
 **Flat metadata** — Pinecone requires flat records (no nested dicts). All metadata fields are at the top level. Lists of strings are supported (`categories`). Nested objects (like `events_by_month`) are serialized to JSON strings.
 
 **Deterministic chunk IDs** — IDs follow `{slug}_{type}_{index}` patterns so re-ingestion upserts to the same IDs (idempotent). The checkpoint file `.ingest_checkpoint.txt` tracks completed slugs to allow resuming after rate-limit failures.
+
+**Query rewriting** — On follow-up turns, `_rewrite_query()` makes a fast LLM call (temp=0, max 80 tokens) to turn ambiguous references ("tell me more about the first one", "what about their dues?") into a standalone search query before hitting Pinecone. The original question is still passed to the final LLM call so the answer sounds natural. Skipped on the first turn (no history = no ambiguity).
 
 **Multi-turn conversation** — `st.session_state` holds two stores: `messages` (full display state per turn) and `chat_history` (plain `{role, content}` pairs for the LLM). Context is injected only into the current user message — prior user messages in history are raw questions only. This keeps history lightweight.
 

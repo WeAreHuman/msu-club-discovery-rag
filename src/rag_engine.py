@@ -155,6 +155,35 @@ End every response with one real follow-up question — the kind a friend would 
 }
         return prompts.get(vibe, prompts["scholar"])
 
+    def _rewrite_query(self, question: str, conversation_history: List[Dict]) -> str:
+        """
+        Rewrite the current question into a standalone search query by resolving
+        pronouns and references against recent conversation history.
+        Only called when history exists — first-turn queries pass through unchanged.
+        """
+        # Condense to last 4 messages (2 turns) — enough context, not too much noise
+        recent = conversation_history[-4:]
+        history_text = "\n".join(
+            f"{m['role'].capitalize()}: {m['content']}" for m in recent
+        )
+
+        prompt = f"""Given the conversation history below, rewrite the last user message as a self-contained search query. Resolve any pronouns or references (e.g. "that club", "them", "it") into explicit names or topics. Output ONLY the rewritten query — no explanation, no quotes.
+
+Conversation history:
+{history_text}
+
+New message: {question}
+
+Standalone search query:"""
+
+        rewritten = self.llm_client.generate(
+            prompt=prompt,
+            system_prompt=None,
+            temperature=0.0,
+            max_tokens=80,
+        )
+        return rewritten.strip()
+
     def _build_user_prompt(self, query: str, context: str) -> str:
         """
         Build user prompt with query and context
@@ -279,20 +308,29 @@ Please answer the question based on the context above. Cite your sources using [
         """
         print(f"\n🔍 Chat query: '{question}'")
 
+        # Rewrite ambiguous follow-up questions into standalone search queries
+        if conversation_history:
+            search_query = self._rewrite_query(question, conversation_history)
+            if search_query != question:
+                print(f"   ✏️  Rewritten: '{search_query}'")
+        else:
+            search_query = question
+
         # Build filters — explicit overrides take priority over auto-extraction
+        # Filters run against the rewritten query so references are already resolved
         filters = {}
         if org_name:
             filters["org_name"] = {"$eq": org_name}
         if chunk_type:
             filters["chunk_type"] = {"$eq": chunk_type}
         if not filters and apply_filters:
-            filters = self._extract_filters_from_query(question)
+            filters = self._extract_filters_from_query(search_query)
             if filters:
                 print(f"   📋 Extracted filters: {filters}")
 
         top_k = top_k or config.TOP_K_RESULTS
         chunks = self.vector_store.search(
-            query=question,
+            query=search_query,
             top_k=top_k,
             filters=filters if filters else None,
         )
