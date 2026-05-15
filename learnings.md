@@ -613,3 +613,92 @@ Vibe badge icons inside the chat (the colored pill shown above each answer) are 
 **Files changed**
 - `src/rag_engine.py`: Updated all three system prompt strings in `_build_system_prompt()` to include a follow-up instruction block at the end of each
 - `app.py`: Rewrote `render_sidebar()` — New Chat at top, removed emojis from radio keys, consolidated filter subheaders
+
+---
+
+### 2026-05-14 — RAGAS Evaluation Pipeline
+
+**What was built**
+
+A local evaluation harness using [RAGAS](https://docs.ragas.io) to measure retrieval and generation quality across 6 standard RAG metrics. Runs locally on demand — not part of the deployed app.
+
+**The 6 metrics**
+
+| Metric | What it measures | Needs ground truth? |
+|---|---|---|
+| Faithfulness | Is the answer grounded in the retrieved context? (no hallucination) | No |
+| Answer Relevancy | Does the answer actually address the question? | No |
+| Context Precision | Are the retrieved chunks relevant to the question? | Yes |
+| Context Recall | Do the retrieved chunks cover what the ground truth says? | Yes |
+| Answer Correctness | Is the answer factually correct vs. ground truth? | Yes |
+| Answer Similarity | Is the answer semantically close to the ground truth? | Yes |
+
+All scores are 0–1. Higher is better. The first two (faithfulness, answer relevancy) are the most important for catching hallucinations and off-topic answers.
+
+**Architecture decision: where eval lives**
+
+Inside the repo under `eval/` but with its own `eval/requirements-eval.txt`. It is NOT in the main `requirements.txt` — Streamlit Cloud must not install ragas, langchain-openai, datasets etc. The prod app stays lean; eval is a developer tool.
+
+```
+eval/
+  requirements-eval.txt   ← ragas, langchain-openai, datasets, pandas
+  dataset.json            ← 8 test Q&A pairs (question + ground_truth)
+  run_eval.py             ← runs the full pipeline, saves to results/
+  compare.py              ← diff two result JSON files side by side
+  results/                ← timestamped JSON outputs (gitignored)
+    .gitkeep
+```
+
+**Two-LLM setup**
+
+The app generates answers using Groq (free tier). RAGAS needs its own LLM to score faithfulness, relevancy, and correctness — it uses OpenAI `gpt-4o-mini` + `text-embedding-3-small`. These are the evaluator models, completely separate from the generation model. This is standard practice: use a capable, well-calibrated model as a judge, regardless of what model the app uses.
+
+Requires `OPENAI_API_KEY` in `.env` to run eval. Normal app keys (Pinecone, Groq) are also needed since it runs real queries.
+
+**How the pipeline works**
+
+```
+dataset.json (8 questions + ground truths)
+         ↓
+For each question:
+  RAGEngine.query()  →  answer + retrieved_chunks
+                ↓
+datasets.Dataset: {question, answer, contexts, ground_truth}
+         ↓
+ragas.evaluate(dataset, metrics=[...], llm=gpt-4o-mini)
+         ↓
+eval/results/<timestamp>[_label].json
+  { summary: {metric: score}, per_question: [...] }
+```
+
+**How to run**
+
+```bash
+# First time setup
+pip install -r eval/requirements-eval.txt
+
+# Run baseline
+python eval/run_eval.py --label baseline
+
+# Run after a change (e.g. tweaking top_k)
+python eval/run_eval.py --label top_k_8 --top-k 8
+
+# Compare the two
+python eval/compare.py eval/results/..._baseline.json eval/results/..._top_k_8.json
+```
+
+**When to run**
+
+Not on every commit — each run costs OpenAI credits and takes ~2–3 minutes. Run it as a checkpoint before/after: changing chunking strategy, changing `top_k`, modifying system prompts, or swapping embedding models. Think of it like running a test suite before merging a significant change.
+
+**Ground truths in dataset.json**
+
+The 8 ground truth answers are written as general-purpose reference answers. They should be validated and refined over time as you learn what the actual Pinecone data says. Inaccurate ground truths will make context_recall and answer_correctness scores misleading. The other two metrics (faithfulness, answer_relevancy) don't depend on ground truth and are always reliable.
+
+**Files created**
+- `eval/requirements-eval.txt`
+- `eval/dataset.json`
+- `eval/run_eval.py`
+- `eval/compare.py`
+- `eval/results/.gitkeep`
+- `.gitignore`: added `eval/results/*.json`

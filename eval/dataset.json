@@ -1,0 +1,34 @@
+[
+  {
+    "question": "What clubs are good for beginners with no prior experience?",
+    "ground_truth": "Several MSU clubs welcome members with no prior experience, including general interest clubs across academic, social, and hobby categories. Many clubs explicitly state that no experience is required for membership and offer training or workshops for new members."
+  },
+  {
+    "question": "Which MSU clubs have no membership dues or very low fees?",
+    "ground_truth": "Some MSU student organizations charge no membership dues or have minimal fees. These tend to be service-oriented, cultural, or general interest clubs. Specific fee information varies by club and is listed in their profile."
+  },
+  {
+    "question": "Tell me about the Accessibility Club at MSU.",
+    "ground_truth": "The Accessibility Club at MSU is a student organization focused on disability advocacy and accessibility awareness on campus. It welcomes students interested in promoting inclusive environments and supports members with and without disabilities."
+  },
+  {
+    "question": "Are there any engineering or robotics clubs at MSU?",
+    "ground_truth": "MSU has engineering and technically-focused student organizations including robotics clubs and engineering project teams. These clubs typically involve hands-on projects, competitions, and collaboration with industry partners."
+  },
+  {
+    "question": "What clubs focus on community service or volunteering?",
+    "ground_truth": "MSU offers multiple service-oriented clubs that focus on volunteering and community outreach. These clubs partner with local organizations, run campus-wide service events, and engage members in community improvement projects."
+  },
+  {
+    "question": "Are there cultural or international student clubs at MSU?",
+    "ground_truth": "MSU has a wide variety of cultural and international student organizations representing different countries, ethnicities, and cultural backgrounds. These clubs celebrate heritage through events, food, performances, and cultural education."
+  },
+  {
+    "question": "Which clubs are good for networking or career development?",
+    "ground_truth": "Several MSU clubs focus on professional development and networking, particularly in business, technology, and pre-professional tracks. These clubs host industry speakers, career fairs, mentorship programs, and resume workshops."
+  },
+  {
+    "question": "What clubs have regular weekly meetings or events?",
+    "ground_truth": "Many MSU clubs hold regular weekly or bi-weekly meetings. Meeting frequency, day, and time vary by club and are often listed in club event schedules. Students can check club profiles for upcoming meeting details."
+  }
+]

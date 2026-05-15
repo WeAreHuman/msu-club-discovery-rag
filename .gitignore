@@ -40,6 +40,9 @@ dist/
 # data/processed/*
 # !data/processed/.gitkeep
 
+# Eval results (large JSON files, not for version control)
+eval/results/*.json
+
 # Logs
 *.log
 
