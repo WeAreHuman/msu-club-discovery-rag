@@ -702,3 +702,62 @@ The 8 ground truth answers are written as general-purpose reference answers. The
 - `eval/compare.py`
 - `eval/results/.gitkeep`
 - `.gitignore`: added `eval/results/*.json`
+
+---
+
+### 2026-05-14 — Upgraded Generation Model to Llama 4 Maverick
+
+**What changed**
+
+Switched `LLM_MODEL` in `.env` from `llama-3.3-70b-versatile` to
+`meta-llama/llama-4-maverick-17b-128e-instruct`.
+
+**Why**
+
+Groq added Llama 4 models to their free tier. Maverick is a 17B MoE (Mixture of Experts)
+model with 128 expert layers — the "17B" parameter count is misleading because MoE
+activates many more effective parameters per token than a 70B dense model. Benchmarks
+put it near GPT-4o quality.
+
+No code change was needed. `LLM_MODEL` flows through `config.py` → `GroqClient` already,
+so updating the env var is the only required change.
+
+**Trade-off**
+
+Free-tier rate limits are the same. Maverick is slightly slower than 70B dense on
+simple prompts, but quality is noticeably better for multi-turn reasoning.
+
+---
+
+### 2026-05-14 — RAGAS Eval: Switched from OpenAI to Groq + HuggingFace
+
+**What changed**
+
+Original eval setup required `OPENAI_API_KEY` (paid). Switched to:
+- **Evaluator LLM**: Groq `llama-3.3-70b-versatile` via `langchain-groq` (free)
+- **Evaluator embeddings**: local HuggingFace `sentence-transformers/all-MiniLM-L6-v2`
+  via `langchain-huggingface` (~90 MB download on first run, cached after)
+
+**Why**
+
+No OpenAI account / free tier only. Using Groq for eval keeps the entire project free.
+
+**Why use llama-3.3-70b for eval instead of the new Maverick generation model?**
+
+Self-scoring bias — using the same model to both generate answers and judge them inflates
+scores. A different, well-calibrated model as the judge gives more honest metrics. 70B is
+also a well-tested instruction follower for NLI tasks that RAGAS relies on.
+
+**Files changed**
+- `eval/requirements-eval.txt`: removed `langchain-openai`, `openai`; added `langchain-groq`,
+  `langchain-huggingface`, `sentence-transformers`
+- `eval/run_eval.py`: replaced `ChatOpenAI` + `OpenAIEmbeddings` with `ChatGroq` +
+  `HuggingFaceEmbeddings`; guard now checks `GROQ_API_KEY`; result JSON records `eval_llm`
+  and `eval_embeddings` fields
+
+**Known limitation**
+
+HuggingFace `all-MiniLM-L6-v2` is a much smaller embedding model than OpenAI's
+`text-embedding-3-small`. Answer Relevancy scores may differ from what you'd get with
+the OpenAI embeddings — scores across runs are still comparable to each other as long as
+the same embedding model is used consistently.

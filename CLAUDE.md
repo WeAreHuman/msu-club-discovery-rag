@@ -24,7 +24,7 @@ python ingest_data.py --clear
 # Run system tests
 python test_system.py
 
-# Run RAGAS evaluation (requires eval deps + OPENAI_API_KEY in .env)
+# Run RAGAS evaluation (requires eval deps; uses GROQ_API_KEY — no OpenAI needed)
 pip install -r eval/requirements-eval.txt
 python eval/run_eval.py --label baseline
 
@@ -38,7 +38,7 @@ Copy `.env.example` to `.env` and fill in:
 - `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` — required
 - `LLM_PROVIDER=groq` and `GROQ_API_KEY` — recommended (free tier)
 - `SCRAPER_ORGS_DIR` — path to the `msu_scraper/data/orgs/` directory
-- `OPENAI_API_KEY` — required only for running RAGAS eval (not used by the app)
+- `OPENAI_API_KEY` — NOT required; eval uses Groq + local HuggingFace embeddings (no OpenAI needed)
 
 On Streamlit Cloud, secrets are set in the dashboard and exposed as env vars — no special handling needed; `os.getenv()` works identically.
 
@@ -86,7 +86,7 @@ Answer + citations + follow-up suggestion → Streamlit chat UI
 
 **LLM abstraction** — `BaseLLMClient` in `src/llm_client.py` with `generate()` (single-turn) and `generate_with_history()` (multi-turn) methods. `GroqClient` implements both. Switch providers by changing `LLM_PROVIDER` in `.env` — no code changes needed.
 
-**Evaluation is separate from prod** — `eval/` has its own `requirements-eval.txt`. RAGAS + langchain-openai are never installed on Streamlit Cloud. The evaluator LLM is OpenAI `gpt-4o-mini`; the app LLM is Groq. These are intentionally different.
+**Evaluation is separate from prod** — `eval/` has its own `requirements-eval.txt`. RAGAS + eval deps are never installed on Streamlit Cloud. The evaluator LLM is Groq `llama-3.3-70b-versatile`; embeddings use local HuggingFace `all-MiniLM-L6-v2` (~90 MB, cached after first download). No OpenAI key required.
 
 ### File Roles
 

@@ -8,8 +8,9 @@ Usage:
 
 Prerequisites:
     pip install -r eval/requirements-eval.txt
-    OPENAI_API_KEY set in .env  (RAGAS uses OpenAI as its evaluator LLM)
+    GROQ_API_KEY set in .env  (RAGAS uses Groq llama-3.3-70b-versatile as evaluator LLM)
     All normal app env vars (PINECONE_API_KEY, GROQ_API_KEY, etc.) also set in .env
+    HuggingFace embeddings (all-MiniLM-L6-v2) download ~90 MB on first run, then cached.
 
 Results are saved to eval/results/<timestamp>[_label].json
 """
@@ -31,30 +32,22 @@ import pandas as pd
 from datasets import Dataset
 
 from ragas import evaluate
-from ragas.metrics import (
-    Faithfulness,
-    AnswerRelevancy,
-    ContextPrecision,
-    ContextRecall,
-    AnswerCorrectness,
-    AnswerSimilarity,
-)
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from ragas.llms import LangchainLLMWrapper
+from ragas.metrics._faithfulness import Faithfulness
+from ragas.metrics._answer_relevance import AnswerRelevancy
+from ragas.metrics._context_precision import ContextPrecision
+from ragas.metrics._context_recall import ContextRecall
+from ragas.metrics._answer_correctness import AnswerCorrectness
+from ragas.metrics._answer_similarity import AnswerSimilarity
+from openai import OpenAI
+from langchain_huggingface import HuggingFaceEmbeddings as LCHFEmbeddings
+from ragas.llms import llm_factory
 from ragas.embeddings import LangchainEmbeddingsWrapper
 
 from src.rag_engine import RAGEngine
 import config
 
-
-METRICS = [
-    Faithfulness(),
-    AnswerRelevancy(),
-    ContextPrecision(),
-    ContextRecall(),
-    AnswerCorrectness(),
-    AnswerSimilarity(),
-]
+EVAL_LLM_MODEL = "llama-3.3-70b-versatile"
+EVAL_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def build_eval_dataset(rag: RAGEngine, test_cases: list, top_k: int) -> Dataset:
@@ -118,11 +111,11 @@ def main():
     )
     args = parser.parse_args()
 
-    # Guard: OPENAI_API_KEY is required — RAGAS uses it as the evaluator LLM
-    if not os.getenv("OPENAI_API_KEY"):
-        print("ERROR: OPENAI_API_KEY is not set.")
-        print("RAGAS uses OpenAI (gpt-4o-mini) to score faithfulness, relevancy, etc.")
-        print("Add OPENAI_API_KEY to your .env file and retry.")
+    # Guard: GROQ_API_KEY is required — RAGAS uses Groq as its evaluator LLM
+    if not os.getenv("GROQ_API_KEY"):
+        print("ERROR: GROQ_API_KEY is not set.")
+        print("RAGAS uses Groq (llama-3.3-70b-versatile) to score faithfulness, relevancy, etc.")
+        print("Add GROQ_API_KEY to your .env file and retry.")
         sys.exit(1)
 
     # Load test cases
@@ -136,6 +129,8 @@ def main():
 
     print(f"Loaded {len(test_cases)} test cases from {dataset_path.name}")
     print(f"top_k={args.top_k}  label='{args.label or 'none'}'")
+    print(f"Evaluator LLM  : Groq / {EVAL_LLM_MODEL}")
+    print(f"Evaluator embed: HuggingFace / {EVAL_EMBED_MODEL}")
 
     # Init RAG engine (uses Groq + Pinecone from .env)
     config.validate_config()
@@ -145,21 +140,34 @@ def main():
     print("\nRunning questions through RAG pipeline...")
     eval_dataset = build_eval_dataset(rag, test_cases, top_k=args.top_k)
 
-    # Step 2: configure RAGAS to use OpenAI as its evaluator
-    evaluator_llm = LangchainLLMWrapper(
-        ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Step 2: configure RAGAS to use Groq as evaluator LLM + local HuggingFace embeddings
+    # Use OpenAI client pointed at Groq's base URL — Groq is OpenAI-compatible and
+    # RAGAS's instructor adapter requires an OpenAI-style client (not Groq SDK directly)
+    groq_client = OpenAI(
+        api_key=os.getenv("GROQ_API_KEY"),
+        base_url="https://api.groq.com/openai/v1",
     )
+    evaluator_llm = llm_factory(EVAL_LLM_MODEL, provider="openai", client=groq_client)
+    print(f"\nLoading embedding model '{EVAL_EMBED_MODEL}' (downloads ~90 MB on first run, then cached)...")
     evaluator_embeddings = LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(model="text-embedding-3-small")
+        LCHFEmbeddings(model_name=EVAL_EMBED_MODEL)
     )
+
+    # Metrics must be instantiated after LLM/embeddings are ready (newer RAGAS API)
+    metrics = [
+        Faithfulness(llm=evaluator_llm),
+        AnswerRelevancy(llm=evaluator_llm, embeddings=evaluator_embeddings),
+        ContextPrecision(llm=evaluator_llm),
+        ContextRecall(llm=evaluator_llm),
+        AnswerCorrectness(llm=evaluator_llm, embeddings=evaluator_embeddings),
+        AnswerSimilarity(embeddings=evaluator_embeddings),
+    ]
 
     # Step 3: run RAGAS
     print("\nRunning RAGAS evaluation...")
     result = evaluate(
         dataset=eval_dataset,
-        metrics=METRICS,
-        llm=evaluator_llm,
-        embeddings=evaluator_embeddings,
+        metrics=metrics,
     )
 
     # Step 4: build summary (mean of each metric across all questions)
@@ -180,6 +188,8 @@ def main():
         "dataset": args.dataset,
         "top_k": args.top_k,
         "num_questions": len(test_cases),
+        "eval_llm": EVAL_LLM_MODEL,
+        "eval_embeddings": EVAL_EMBED_MODEL,
         "summary": summary,
         "per_question": df.to_dict(orient="records"),
     }
