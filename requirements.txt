@@ -10,6 +10,10 @@ tiktoken>=0.5.0
 # LLM Integration
 groq>=1.0.0
 
+# API layer
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
 # Utilities
 pydantic
 requests

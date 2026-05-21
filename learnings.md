@@ -815,3 +815,81 @@ LLM generates final answer
 
 - `src/rag_engine.py`: added `_rewrite_query()` method; updated `chat()` to call it
   and use the result as `search_query` for Pinecone, keeping `question` for the LLM prompt
+
+---
+
+### 2026-05-21 — Headless Architecture: FastAPI Backend + Streamlit Frontend
+
+**What was built**
+
+Separated the RAG engine from the Streamlit UI by introducing a FastAPI layer. The app now runs as two independent processes: a headless API server and a thin UI client.
+
+**Why**
+
+Streamlit tightly couples UI rendering with business logic — the previous `app.py` imported `RAGEngine` directly. This meant the RAG engine could only be consumed via Streamlit. Moving to FastAPI makes the engine accessible to any HTTP client (curl, mobile app, other UIs, eval scripts), which is the standard production pattern.
+
+**The three-layer stack**
+
+```
+Streamlit UI (app.py)
+    ↓  HTTP POST /chat
+FastAPI backend (api/main.py)
+    ↓  method call
+RAGEngine (src/rag_engine.py)
+    ↓
+Pinecone + Groq
+```
+
+**API surface**
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /chat` | Multi-turn chat with `conversation_history` |
+| `POST /query` | Single-turn query (no history) |
+| `GET /health` | Liveness check — returns model/index metadata |
+
+Request and response shapes are in `api/models.py` using Pydantic.
+
+**`RAGEngine` unchanged**
+
+The engine itself required zero changes. FastAPI is purely an adapter layer — it deserializes HTTP requests into Python dicts, calls `engine.chat()` or `engine.query()`, and serializes the result back to JSON. This is the right abstraction boundary.
+
+**Streamlit becomes a thin client**
+
+`app.py` no longer imports `RAGEngine`. Instead it calls `_api_post("/chat", payload)` using `requests`. Session state management and rendering logic are identical — only the data source changed. `check_api_health()` runs on startup; if the API is unreachable, Streamlit shows a clear error and stops.
+
+**New config value**
+
+`API_BASE_URL` (default `http://localhost:8000`) added to `config.py` so the API host is configurable per environment without code changes.
+
+**Files created**
+
+- `api/__init__.py`
+- `api/models.py` — Pydantic request/response models
+- `api/main.py` — FastAPI app with lifespan startup, three routes
+
+**Files modified**
+
+- `app.py` — removed `RAGEngine` import, replaced `rag_engine.chat()` with `_api_post("/chat")`
+- `config.py` — added `API_BASE_URL`
+- `requirements.txt` — added `fastapi>=0.111.0`, `uvicorn[standard]>=0.29.0`
+- `CLAUDE.md` — updated architecture diagram and commands
+
+**Running locally**
+
+Two terminals required:
+```bash
+# Terminal 1 — backend
+uvicorn api.main:app --reload --port 8000
+
+# Terminal 2 — frontend
+streamlit run app.py
+```
+
+**Key insight**
+
+The FastAPI `lifespan` context manager initializes `RAGEngine` once at server startup (not per request). This is equivalent to Streamlit's `@st.cache_resource` — the heavy Pinecone + Groq connections are created once and reused. Per-request initialization would make every query take seconds just for connection overhead.
+
+**Trade-off to know**
+
+For Streamlit Cloud, this architecture requires hosting the FastAPI backend separately (Railway, Render, etc.) since Streamlit Cloud runs only one process. The `API_BASE_URL` secret points the UI at the hosted backend. In local dev, both processes run on the same machine.

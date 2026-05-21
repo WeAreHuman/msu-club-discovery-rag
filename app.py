@@ -1,5 +1,8 @@
 """
 MSU Club Discovery RAG Assistant - Streamlit Web App
+
+Thin frontend: all RAG logic lives in the FastAPI backend (api/main.py).
+Set API_BASE_URL in .env to point at the running API server.
 """
 
 import sys
@@ -7,11 +10,11 @@ if 'readline' not in sys.modules:
     import types
     sys.modules['readline'] = types.ModuleType('readline')
 
+import requests
 import streamlit as st
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
-from src.rag_engine import RAGEngine
 import config
 
 # ============================================================================
@@ -182,15 +185,34 @@ div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button[kind="se
 
 
 # ============================================================================
-# RAG ENGINE (cached)
+# API CLIENT
 # ============================================================================
-@st.cache_resource
-def initialize_rag_engine():
+def _api_post(endpoint: str, payload: dict) -> dict:
+    """POST to the FastAPI backend and return the JSON response."""
+    url = f"{config.API_BASE_URL}{endpoint}"
     try:
-        config.validate_config()
-        return RAGEngine(), None
-    except Exception as e:
-        return None, str(e)
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.ConnectionError:
+        st.error(
+            f"Cannot reach the API server at **{config.API_BASE_URL}**. "
+            "Start it with: `uvicorn api.main:app --reload`"
+        )
+        st.stop()
+    except requests.exceptions.HTTPError as e:
+        st.error(f"API error {e.response.status_code}: {e.response.text}")
+        st.stop()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def check_api_health() -> dict | None:
+    try:
+        resp = requests.get(f"{config.API_BASE_URL}/health", timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
 
 
 VIBE_META = {
@@ -249,7 +271,8 @@ def render_sidebar():
     st.sidebar.caption(
         f"**LLM**: {config.LLM_PROVIDER.title()} / {config.LLM_MODEL}\n\n"
         f"**Embed**: {config.EMBEDDING_MODEL}\n\n"
-        f"**Index**: {config.PINECONE_INDEX_NAME}"
+        f"**Index**: {config.PINECONE_INDEX_NAME}\n\n"
+        f"**API**: {config.API_BASE_URL}"
     )
 
     return {
@@ -330,17 +353,16 @@ def render_assistant_message(msg):
 # MAIN
 # ============================================================================
 def main():
-    rag_engine, error = initialize_rag_engine()
-
-    if error:
-        st.error(f"Failed to initialize: {error}")
-        return
+    health = check_api_health()
+    if health is None:
+        st.error(
+            f"API server unreachable at **{config.API_BASE_URL}**. "
+            "Run `uvicorn api.main:app --reload` to start it."
+        )
+        st.stop()
 
     filters = render_sidebar()
 
-    # ── Session state ────────────────────────────────────────────────────────
-    # messages: full display state — {role, content, citations, vibe, ...}
-    # chat_history: plain {role, content} pairs passed to the LLM each turn
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "chat_history" not in st.session_state:
@@ -382,7 +404,7 @@ def main():
             else:
                 render_assistant_message(msg)
 
-    # ── Get new input (chat box or example chip) ──────────────────────────────
+    # ── Get new input ─────────────────────────────────────────────────────────
     prompt = st.session_state.pop("pending_prompt", None)
     chat_input = st.chat_input("Ask about MSU clubs...")
     if chat_input:
@@ -395,16 +417,16 @@ def main():
 
         with st.chat_message("assistant"):
             with st.spinner("Searching knowledge base..."):
-                response = rag_engine.chat(
-                    question=prompt,
-                    conversation_history=st.session_state.chat_history,
-                    top_k=filters["top_k"],
-                    apply_filters=True,
-                    return_citations=True,
-                    vibe=filters["vibe"],
-                    org_name=filters["org_name"],
-                    chunk_type=filters["chunk_type"],
-                )
+                response = _api_post("/chat", {
+                    "question": prompt,
+                    "conversation_history": st.session_state.chat_history,
+                    "top_k": filters["top_k"],
+                    "vibe": filters["vibe"],
+                    "org_name": filters["org_name"],
+                    "chunk_type": filters["chunk_type"],
+                    "apply_filters": True,
+                    "return_citations": True,
+                })
 
             assistant_msg = {
                 "role": "assistant",
@@ -412,21 +434,19 @@ def main():
                 "citations": response.get("citations", []),
                 "filters_applied": response.get("filters_applied", {}),
                 "vibe": filters["vibe"],
-                "num_chunks": len(response.get("retrieved_chunks", [])),
+                "num_chunks": response.get("num_chunks", 0),
             }
             render_assistant_message(assistant_msg)
 
-        # Persist to session state
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.messages.append(assistant_msg)
 
-        # LLM history uses plain question/answer — no context blob in user turn
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         st.session_state.chat_history.append({"role": "assistant", "content": response["answer"]})
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
-        "<div class='footer'>MSU Club Discovery &nbsp;·&nbsp; Pinecone + Groq/Llama 3.3 + Streamlit</div>",
+        "<div class='footer'>MSU Club Discovery &nbsp;·&nbsp; Pinecone + Groq/Llama 3.3 + FastAPI + Streamlit</div>",
         unsafe_allow_html=True,
     )
 

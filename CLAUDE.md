@@ -4,12 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A RAG (Retrieval-Augmented Generation) chatbot for discovering MSU student clubs. Students have multi-turn conversations; the system retrieves relevant club data from Pinecone and generates answers via Groq/Llama. Deployed on Streamlit Cloud.
+A RAG (Retrieval-Augmented Generation) chatbot for discovering MSU student clubs. Students have multi-turn conversations; the system retrieves relevant club data from Pinecone and generates answers via Groq/Llama. The architecture is **headless**: a FastAPI backend exposes the RAG engine as a REST API, and Streamlit is a thin frontend client.
 
 ## Commands
 
 ```bash
-# Run the app locally
+# Start the FastAPI backend (required before running the UI)
+uvicorn api.main:app --reload --port 8000
+
+# Run the Streamlit UI (in a separate terminal)
 streamlit run app.py
 
 # Ingest club data into Pinecone (resumes from checkpoint automatically)
@@ -38,11 +41,40 @@ Copy `.env.example` to `.env` and fill in:
 - `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` — required
 - `LLM_PROVIDER=groq` and `GROQ_API_KEY` — recommended (free tier)
 - `SCRAPER_ORGS_DIR` — path to the `msu_scraper/data/orgs/` directory
+- `API_BASE_URL` — URL of the FastAPI backend (default: `http://localhost:8000`)
 - `OPENAI_API_KEY` — NOT required; eval uses Groq + local HuggingFace embeddings (no OpenAI needed)
 
-On Streamlit Cloud, secrets are set in the dashboard and exposed as env vars — no special handling needed; `os.getenv()` works identically.
-
 ## Architecture
+
+### Headless Design
+
+The system is split into two independently runnable layers:
+
+```
+┌─────────────────────────────────────┐
+│   Streamlit UI  (app.py)            │
+│   — thin HTTP client                │
+│   — no RAG logic, no Pinecone       │
+└──────────────┬──────────────────────┘
+               │ HTTP POST /chat
+               │ HTTP POST /query
+               ▼
+┌─────────────────────────────────────┐
+│   FastAPI backend  (api/main.py)    │
+│   POST /chat   — multi-turn RAG     │
+│   POST /query  — single-turn RAG    │
+│   GET  /health — liveness check     │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│   RAGEngine  (src/rag_engine.py)    │
+│   VectorStore → Pinecone            │
+│   LLMClient  → Groq                 │
+└─────────────────────────────────────┘
+```
+
+Any HTTP client (curl, Postman, mobile app, another UI) can talk directly to the API.
 
 ### Two Separate Workflows
 
@@ -58,9 +90,9 @@ VectorStore.upsert_chunks()  →  Pinecone (llama-text-embed-v2, 1024 dims)
 
 **Chat (real-time, multi-turn):**
 ```
-User message
-    ↓
-RAGEngine.chat(question, conversation_history)
+Streamlit UI
+    ↓ POST /chat  { question, conversation_history, vibe, filters }
+FastAPI  →  RAGEngine.chat(question, conversation_history)
   ├── _rewrite_query()                ← LLM rewrites follow-ups into standalone search queries
   │                                      (skipped on first turn; uses last 4 messages only)
   ├── _extract_filters_from_query()   ← keyword-based, runs on rewritten query
@@ -69,10 +101,12 @@ RAGEngine.chat(question, conversation_history)
   ├── messages = chat_history + current user message (original question) with injected context
   └── LLM.generate_with_history(messages, system_prompt)
     ↓
-Answer + citations + follow-up suggestion → Streamlit chat UI
+{ answer, citations, filters_applied, num_chunks }  →  Streamlit chat UI
 ```
 
 ### Key Design Decisions
+
+**Headless API** — `RAGEngine` has no Streamlit dependency. The FastAPI layer adds Pydantic validation and HTTP transport. Any client can consume it. `API_BASE_URL` in `config.py` (default `http://localhost:8000`) tells the Streamlit app where the API lives.
 
 **Chunk types** — Profile, event, and constitution chunks are stored separately with a `chunk_type` metadata field. This allows metadata-filtered retrieval (e.g., only event chunks when the query mentions "meeting" or "schedule"). Never mix chunk types in the same record.
 
@@ -84,7 +118,7 @@ Answer + citations + follow-up suggestion → Streamlit chat UI
 
 **Query rewriting** — On follow-up turns, `_rewrite_query()` makes a fast LLM call (temp=0, max 80 tokens) to turn ambiguous references ("tell me more about the first one", "what about their dues?") into a standalone search query before hitting Pinecone. The original question is still passed to the final LLM call so the answer sounds natural. Skipped on the first turn (no history = no ambiguity).
 
-**Multi-turn conversation** — `st.session_state` holds two stores: `messages` (full display state per turn) and `chat_history` (plain `{role, content}` pairs for the LLM). Context is injected only into the current user message — prior user messages in history are raw questions only. This keeps history lightweight.
+**Multi-turn conversation** — Streamlit `st.session_state` holds two stores: `messages` (full display state per turn) and `chat_history` (plain `{role, content}` pairs for the LLM). Context is injected only into the current user message — prior user messages in history are raw questions only. This keeps history lightweight.
 
 **Vibe selector** — `_build_system_prompt(vibe)` returns one of three system prompts (`"scholar"`, `"buddy"`, `"nofilter"`). Each prompt includes an instruction to end every answer with one empathetic follow-up question. Retrieval is identical across all vibes; only the system prompt string changes.
 
@@ -96,8 +130,10 @@ Answer + citations + follow-up suggestion → Streamlit chat UI
 
 | File | Role |
 |------|------|
-| `app.py` | Streamlit chat UI — sidebar, hero, `st.chat_message` rendering, session state |
-| `config.py` | Single source of truth for all env vars and constants |
+| `app.py` | Streamlit chat UI — thin HTTP client, no RAG logic |
+| `api/main.py` | FastAPI app — lifespan init, `/chat`, `/query`, `/health` routes |
+| `api/models.py` | Pydantic request/response models for the API |
+| `config.py` | Single source of truth for all env vars and constants (incl. `API_BASE_URL`) |
 | `src/rag_engine.py` | Orchestrates retrieval + generation; owns system prompts and `chat()` method |
 | `src/vector_store.py` | Pinecone upsert/search; handles embedding and metadata flattening |
 | `src/llm_client.py` | LLM provider abstraction — `generate()` and `generate_with_history()` |
@@ -124,4 +160,6 @@ Run eval before/after: chunking changes, `top_k` tuning, system prompt edits, em
 
 ## Deployment
 
-Streamlit Cloud deploys from the `main` branch automatically on push. Changes on feature branches must be merged to `main` to take effect in production.
+**Local development** requires two processes: `uvicorn api.main:app --reload` + `streamlit run app.py`. Set `API_BASE_URL` in `.env` if the API runs on a different host/port.
+
+**Streamlit Cloud** currently deploys only the Streamlit app. For full headless deployment, host the FastAPI backend separately (e.g., Railway, Render, or a VPS) and set `API_BASE_URL` to that URL in Streamlit Cloud secrets.
