@@ -8,6 +8,7 @@ if 'readline' not in sys.modules:
     sys.modules['readline'] = types.ModuleType('readline')
 
 import streamlit as st
+import streamlit.components.v1 as components
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
@@ -264,46 +265,39 @@ def render_sidebar():
 # RENDER HELPERS
 # ============================================================================
 def render_citations(citations):
-    st.markdown("""
-    <div class="results-header" style="margin-top:24px;">
-        <div class="results-header-line"></div>
-        <div class="results-header-text">Sources</div>
-        <div class="results-header-line" style="background:linear-gradient(90deg,transparent,#2e7d52);"></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    for cite in citations:
-        meta = cite.get("metadata", {})
-        label = (
-            f"[{cite['source_number']}]  {cite['org_name']}"
-            f"  ·  {cite['chunk_type']}"
-            f"  ·  {cite['relevance_score']:.0%} match"
-        )
-        with st.expander(label):
-            st.markdown(
-                f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
-                unsafe_allow_html=True,
+    with st.expander(f"📚 Sources — {len(citations)} references", expanded=False):
+        for cite in citations:
+            meta = cite.get("metadata", {})
+            label = (
+                f"[{cite['source_number']}]  {cite['org_name']}"
+                f"  ·  {cite['chunk_type']}"
+                f"  ·  {cite['relevance_score']:.0%} match"
             )
-            badges = []
-            if meta.get("contact_email"):
-                badges.append(f"✉ {meta['contact_email']}")
-            if meta.get("contact_website"):
-                badges.append(f"🌐 {meta['contact_website']}")
-            if meta.get("org_url"):
-                badges.append("🔗 CampusLabs page")
-            if meta.get("categories"):
-                cats = meta["categories"]
-                if isinstance(cats, list):
-                    cats = " · ".join(cats)
-                badges.append(f"🏷 {cats}")
-            if badges:
+            with st.expander(label):
                 st.markdown(
-                    " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
+                    f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
                     unsafe_allow_html=True,
                 )
+                badges = []
+                if meta.get("contact_email"):
+                    badges.append(f"✉ {meta['contact_email']}")
+                if meta.get("contact_website"):
+                    badges.append(f"🌐 {meta['contact_website']}")
+                if meta.get("org_url"):
+                    badges.append("🔗 CampusLabs page")
+                if meta.get("categories"):
+                    cats = meta["categories"]
+                    if isinstance(cats, list):
+                        cats = " · ".join(cats)
+                    badges.append(f"🏷 {cats}")
+                if badges:
+                    st.markdown(
+                        " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
+                        unsafe_allow_html=True,
+                    )
 
 
-def render_assistant_message(msg):
+def render_assistant_message(msg, scroll_to_top=False):
     vibe_key = msg.get("vibe", "scholar")
     vm = VIBE_META[vibe_key]
     st.markdown(
@@ -324,6 +318,17 @@ def render_assistant_message(msg):
             "chunks_retrieved": msg.get("num_chunks", 0),
             "filters_applied": msg.get("filters_applied", {}),
         })
+    if scroll_to_top:
+        components.html("""
+        <script>
+            setTimeout(function() {
+                var msgs = window.parent.document.querySelectorAll('[data-testid="stChatMessage"]');
+                if (msgs.length > 0) {
+                    msgs[msgs.length - 1].scrollIntoView({block: 'start', behavior: 'smooth'});
+                }
+            }, 200);
+        </script>
+        """, height=0)
 
 
 # ============================================================================
@@ -411,7 +416,7 @@ def main():
                 "vibe": filters["vibe"],
                 "num_chunks": len(response.get("retrieved_chunks", [])),
             }
-            render_assistant_message(assistant_msg)
+            render_assistant_message(assistant_msg, scroll_to_top=True)
 
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.messages.append(assistant_msg)
