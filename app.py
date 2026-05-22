@@ -268,33 +268,28 @@ def render_citations(citations):
     with st.expander(f"📚 Sources — {len(citations)} references", expanded=False):
         for cite in citations:
             meta = cite.get("metadata", {})
-            label = (
-                f"[{cite['source_number']}]  {cite['org_name']}"
-                f"  ·  {cite['chunk_type']}"
-                f"  ·  {cite['relevance_score']:.0%} match"
-            )
-            with st.expander(label):
-                st.markdown(
-                    f"<div class='citation-snippet'>{cite['text_snippet']}</div>",
-                    unsafe_allow_html=True,
-                )
-                badges = []
-                if meta.get("contact_email"):
-                    badges.append(f"✉ {meta['contact_email']}")
-                if meta.get("contact_website"):
-                    badges.append(f"🌐 {meta['contact_website']}")
-                if meta.get("org_url"):
-                    badges.append("🔗 CampusLabs page")
-                if meta.get("categories"):
-                    cats = meta["categories"]
-                    if isinstance(cats, list):
-                        cats = " · ".join(cats)
-                    badges.append(f"🏷 {cats}")
-                if badges:
-                    st.markdown(
-                        " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges),
-                        unsafe_allow_html=True,
-                    )
+            badges = []
+            if meta.get("contact_email"):
+                badges.append(f"✉ {meta['contact_email']}")
+            if meta.get("contact_website"):
+                badges.append(f"🌐 {meta['contact_website']}")
+            if meta.get("org_url"):
+                badges.append("🔗 CampusLabs page")
+            if meta.get("categories"):
+                cats = meta["categories"]
+                if isinstance(cats, list):
+                    cats = " · ".join(cats)
+                badges.append(f"🏷 {cats}")
+            badges_html = " ".join(f"<span class='meta-badge'>{b}</span>" for b in badges)
+            st.markdown(f"""
+<div style="border:1px solid #1e3a2a;border-radius:8px;padding:12px 16px;margin-bottom:10px;background:#0b1a12;">
+  <div style="color:#81c784;font-size:0.85rem;font-weight:600;margin-bottom:6px;">
+    [{cite['source_number']}] {cite['org_name']}
+    <span style="color:#546e7a;font-weight:400;"> · {cite['chunk_type']} · {cite['relevance_score']:.0%} match</span>
+  </div>
+  <div class="citation-snippet" style="margin-bottom:{'8px' if badges else '0'};">{cite['text_snippet']}</div>
+  {badges_html}
+</div>""", unsafe_allow_html=True)
 
 
 def render_assistant_message(msg, scroll_to_top=False):
