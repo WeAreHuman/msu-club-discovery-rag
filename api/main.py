@@ -58,6 +58,10 @@ def health():
     )
 
 
+# TODO: move to POST /feedback endpoint in api/main.py when FastAPI is activated
+# Endpoint should accept: { run_id, score: 1|-1, comment? }
+# and call langsmith Client().create_feedback(run_id=run_id, key="user_feedback", score=score)
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     engine = _get_engine()

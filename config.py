@@ -51,6 +51,19 @@ SUPPORTED_FORMATS = [".pdf", ".txt", ".docx"]
 TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "5"))
 
 # ============================================================================
+# LANGSMITH (optional observability — all tracing disabled when key absent)
+# ============================================================================
+LANGSMITH_API_KEY  = os.getenv("LANGSMITH_API_KEY")
+LANGCHAIN_PROJECT  = os.getenv("LANGCHAIN_PROJECT", "msu-club-discovery")
+LANGSMITH_ENABLED  = bool(LANGSMITH_API_KEY)
+
+# Activate the @traceable decorator only when the API key is present.
+# Setting LANGCHAIN_TRACING_V2 here means callers don't need to export it.
+if LANGSMITH_ENABLED:
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_PROJECT", LANGCHAIN_PROJECT)
+
+# ============================================================================
 # API (headless mode — Streamlit calls this URL)
 # ============================================================================
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")

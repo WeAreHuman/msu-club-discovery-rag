@@ -18,6 +18,21 @@ from src.llm_client import get_llm_client, BaseLLMClient
 
 import config
 
+# Optional LangSmith tracing — silently no-op when not installed or key absent.
+# LANGCHAIN_TRACING_V2 is activated in config.py when LANGSMITH_API_KEY is set.
+try:
+    from langsmith import traceable
+    from langsmith.run_helpers import get_current_run_tree
+except ImportError:
+    def traceable(func=None, **kwargs):  # type: ignore[misc]
+        """No-op decorator used when langsmith is not installed."""
+        if func is not None:
+            return func
+        return lambda f: f
+
+    def get_current_run_tree():  # type: ignore[misc]
+        return None
+
 
 class RAGEngine:
     """
@@ -202,6 +217,7 @@ Question: {query}
 
 Please answer the question based on the context above. Cite your sources using [Source X] format when referencing specific information. If you cannot answer based on the context, say so."""
 
+    @traceable(name="rag_query")
     def query(
         self,
         question: str,
@@ -225,7 +241,11 @@ Please answer the question based on the context above. Cite your sources using [
             - citations: List of source citations (if return_citations=True)
             - retrieved_chunks: Raw retrieved chunks
             - filters_applied: Filters extracted from query
+            - run_id: LangSmith trace ID (None when tracing is disabled)
         """
+        run_tree = get_current_run_tree()
+        run_id = str(run_tree.id) if run_tree else None
+
         print(f"\n🔍 Processing query: '{question}'")
 
         # Step 1: Extract filters from query if enabled
@@ -275,7 +295,8 @@ Please answer the question based on the context above. Cite your sources using [
         response = {
             "answer": answer,
             "retrieved_chunks": chunks,
-            "filters_applied": filters
+            "filters_applied": filters,
+            "run_id": run_id,
         }
 
         if return_citations:
@@ -283,6 +304,7 @@ Please answer the question based on the context above. Cite your sources using [
 
         return response
 
+    @traceable(name="rag_chat")
     def chat(
         self,
         question: str,
@@ -306,6 +328,9 @@ Please answer the question based on the context above. Cite your sources using [
             org_name: Optional explicit club filter
             chunk_type: Optional explicit chunk type filter
         """
+        run_tree = get_current_run_tree()
+        run_id = str(run_tree.id) if run_tree else None
+
         print(f"\n🔍 Chat query: '{question}'")
 
         # Rewrite ambiguous follow-up questions into standalone search queries
@@ -368,11 +393,13 @@ Please answer the question based on the context above. Cite your sources using [
             "answer": answer,
             "retrieved_chunks": chunks,
             "filters_applied": filters,
+            "run_id": run_id,
         }
         if return_citations:
             response["citations"] = citations
         return response
 
+    @traceable(name="rag_query_with_filter")
     def query_with_metadata_filter(
         self,
         question: str,
@@ -390,6 +417,9 @@ Please answer the question based on the context above. Cite your sources using [
             chunk_type: restrict to "profile", "event", or "constitution"
             top_k     : number of results
         """
+        run_tree = get_current_run_tree()
+        run_id = str(run_tree.id) if run_tree else None
+
         filters = {}
         if org_name:
             filters["org_name"] = {"$eq": org_name}
@@ -411,7 +441,8 @@ Please answer the question based on the context above. Cite your sources using [
                 "answer": f"No clubs found matching your criteria: {filters}",
                 "citations": [],
                 "retrieved_chunks": [],
-                "filters_applied": filters
+                "filters_applied": filters,
+                "run_id": run_id,
             }
 
         # Build context and generate answer
@@ -428,7 +459,8 @@ Please answer the question based on the context above. Cite your sources using [
             "answer": answer,
             "citations": citations,
             "retrieved_chunks": chunks,
-            "filters_applied": filters
+            "filters_applied": filters,
+            "run_id": run_id,
         }
 
 

@@ -15,6 +15,16 @@ sys.path.append(str(Path(__file__).parent))
 from src.rag_engine import RAGEngine
 import config
 
+# LangSmith feedback client — None when LANGSMITH_API_KEY is not configured.
+# TODO: move to POST /feedback endpoint in api/main.py when FastAPI is activated
+_ls_client = None
+if config.LANGSMITH_ENABLED:
+    try:
+        from langsmith import Client as _LangSmithClient
+        _ls_client = _LangSmithClient()
+    except ImportError:
+        pass
+
 # ============================================================================
 # PAGE CONFIG
 # ============================================================================
@@ -246,13 +256,6 @@ def render_sidebar():
         help="More sources = broader but slower",
     )
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption(
-        f"**LLM**: {config.LLM_PROVIDER.title()} / {config.LLM_MODEL}\n\n"
-        f"**Embed**: {config.EMBEDDING_MODEL}\n\n"
-        f"**Index**: {config.PINECONE_INDEX_NAME}"
-    )
-
     return {
         "chunk_type": chunk_type if chunk_type != "All" else None,
         "org_name": org_name if org_name else None,
@@ -410,8 +413,13 @@ def main():
                 "filters_applied": response.get("filters_applied", {}),
                 "vibe": filters["vibe"],
                 "num_chunks": len(response.get("retrieved_chunks", [])),
+                "run_id": response.get("run_id"),
             }
             render_assistant_message(assistant_msg, scroll_to_top=True)
+
+        # Track run_id so the feedback row below can post to LangSmith.
+        # TODO: move to POST /feedback endpoint in api/main.py when FastAPI is activated
+        st.session_state.feedback_state = {"run_id": response.get("run_id"), "given": False}
 
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.messages.append(assistant_msg)
@@ -419,9 +427,45 @@ def main():
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         st.session_state.chat_history.append({"role": "assistant", "content": response["answer"]})
 
+    # ── Feedback row (shown after each answer; only when LangSmith is active) ──
+    # TODO: move to POST /feedback endpoint in api/main.py when FastAPI is activated
+    pf = st.session_state.get("feedback_state")
+    if pf and pf.get("run_id") and config.LANGSMITH_ENABLED and _ls_client:
+        if pf.get("given"):
+            st.markdown(
+                "<div style='color:#546e7a;font-size:0.85rem;padding:6px 2px;'>✓ Thanks for your feedback!</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div style='color:#546e7a;font-size:0.82rem;padding:6px 2px 2px;'>Was this helpful?</div>",
+                unsafe_allow_html=True,
+            )
+            c1, c2, _ = st.columns([1, 1, 10])
+            with c1:
+                if st.button("👍", key="fb_up", help="Helpful"):
+                    try:
+                        _ls_client.create_feedback(
+                            run_id=pf["run_id"], key="user_feedback", score=1
+                        )
+                    except Exception:
+                        pass
+                    st.session_state.feedback_state["given"] = True
+                    st.rerun()
+            with c2:
+                if st.button("👎", key="fb_down", help="Not helpful"):
+                    try:
+                        _ls_client.create_feedback(
+                            run_id=pf["run_id"], key="user_feedback", score=-1
+                        )
+                    except Exception:
+                        pass
+                    st.session_state.feedback_state["given"] = True
+                    st.rerun()
+
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
-        "<div class='footer'>MSU Club Discovery &nbsp;·&nbsp; Pinecone + Groq/Llama 3.3 + Streamlit</div>",
+        "<div class='footer'>MSU Club Discovery</div>",
         unsafe_allow_html=True,
     )
 
