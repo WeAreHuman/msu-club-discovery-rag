@@ -441,7 +441,7 @@ def main():
                 "<div style='color:#546e7a;font-size:0.82rem;padding:6px 2px 2px;'>Was this helpful?</div>",
                 unsafe_allow_html=True,
             )
-            c1, c2, _ = st.columns([1, 1, 10])
+            c1, c2, _ = st.columns([1, 1, 10], gap="small")
             with c1:
                 if st.button("👍", key="fb_up", help="Helpful"):
                     try:
