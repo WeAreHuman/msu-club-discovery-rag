@@ -170,6 +170,7 @@ End every response with one real follow-up question — the kind a friend would 
 }
         return prompts.get(vibe, prompts["scholar"])
 
+    @traceable(name="rewrite_query")
     def _rewrite_query(self, question: str, conversation_history: List[Dict]) -> str:
         """
         Rewrite the user's question into an optimized standalone search query.
