@@ -194,7 +194,7 @@ End every response with one real follow-up question — the kind a friend would 
                 "There is no prior conversation — treat this as a fresh question."
             )
 
-        prompt = f"""You are a search-query optimizer for an MSU student club discovery system backed by a vector database.
+        prompt = f"""You are a search-query rewriter for an MSU student club discovery system backed by a vector database.
 
 Your job: rewrite the user's message into a precise, self-contained search query that will retrieve the most relevant club information from the database.
 
@@ -208,7 +208,7 @@ Rules:
 
 {history_section}User message: {question}
 
-Optimized search query:"""
+reduced search query:"""
 
         rewritten = self.llm_client.generate(
             prompt=prompt,
