@@ -172,24 +172,43 @@ End every response with one real follow-up question — the kind a friend would 
 
     def _rewrite_query(self, question: str, conversation_history: List[Dict]) -> str:
         """
-        Rewrite the current question into a standalone search query by resolving
-        pronouns and references against recent conversation history.
-        Only called when history exists — first-turn queries pass through unchanged.
+        Rewrite the user's question into an optimized standalone search query.
+        On the first turn (no history): expands vague or short queries with MSU/club
+        context so the embedding search gets a richer signal.
+        On follow-up turns: also resolves pronouns and back-references against recent history.
         """
-        # Condense to last 4 messages (2 turns) — enough context, not too much noise
-        recent = conversation_history[-4:]
-        history_text = "\n".join(
-            f"{m['role'].capitalize()}: {m['content']}" for m in recent
-        )
+        if conversation_history:
+            # Condense to last 4 messages (2 turns) — enough context, not too much noise
+            recent = conversation_history[-4:]
+            history_text = "\n".join(
+                f"{m['role'].capitalize()}: {m['content']}" for m in recent
+            )
+            history_section = f"Conversation history:\n{history_text}\n\n"
+            resolution_instruction = (
+                "Resolve any pronouns or back-references (e.g. 'that club', 'them', 'it', "
+                "'the first one') into explicit club names or topics using the conversation history."
+            )
+        else:
+            history_section = ""
+            resolution_instruction = (
+                "There is no prior conversation — treat this as a fresh question."
+            )
 
-        prompt = f"""Given the conversation history below, rewrite the last user message as a self-contained search query. Resolve any pronouns or references (e.g. "that club", "them", "it") into explicit names or topics. Output ONLY the rewritten query — no explanation, no quotes.
+        prompt = f"""You are a search-query optimizer for an MSU student club discovery system backed by a vector database.
 
-Conversation history:
-{history_text}
+Your job: rewrite the user's message into a precise, self-contained search query that will retrieve the most relevant club information from the database.
 
-New message: {question}
+Rules:
+- Output ONLY the rewritten query — no explanation, no quotes, no extra text.
+- Always add "MSU" or "Michigan State University" if not already present, so the query is grounded.
+- Expand abbreviations and vague terms into specific club-domain language (e.g. "CS clubs" → "computer science programming clubs MSU", "something chill" → "casual social student organizations MSU").
+- Prefer concrete nouns: club names, activities, meeting schedules, dues, membership requirements.
+- Keep it under 20 words.
+- {resolution_instruction}
 
-Standalone search query:"""
+{history_section}User message: {question}
+
+Optimized search query:"""
 
         rewritten = self.llm_client.generate(
             prompt=prompt,
@@ -333,13 +352,12 @@ Please answer the question based on the context above. Cite your sources using [
 
         print(f"\n🔍 Chat query: '{question}'")
 
-        # Rewrite ambiguous follow-up questions into standalone search queries
-        if conversation_history:
-            search_query = self._rewrite_query(question, conversation_history)
-            if search_query != question:
-                print(f"   ✏️  Rewritten: '{search_query}'")
-        else:
-            search_query = question
+        # Always rewrite into an optimized standalone search query.
+        # On first turn: expands and grounds the query for better vector retrieval.
+        # On follow-up turns: also resolves pronouns and back-references.
+        search_query = self._rewrite_query(question, conversation_history or [])
+        if search_query != question:
+            print(f"   ✏️  Rewritten: '{search_query}'")
 
         # Build filters — explicit overrides take priority over auto-extraction
         # Filters run against the rewritten query so references are already resolved
