@@ -390,6 +390,10 @@ def main():
 
     # ── Process prompt ────────────────────────────────────────────────────────
     if prompt:
+        prompt = " ".join(prompt.split())  # collapse newlines + normalize whitespace
+        if len(prompt) > 500:
+            st.warning("Please keep your question under 500 characters.")
+            st.stop()
         with st.chat_message("user"):
             st.markdown(prompt)
 
