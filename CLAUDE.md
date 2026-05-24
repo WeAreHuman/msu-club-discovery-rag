@@ -124,6 +124,12 @@ FastAPI  →  RAGEngine.chat(question, conversation_history)
 
 **LLM abstraction** — `BaseLLMClient` in `src/llm_client.py` with `generate()` (single-turn) and `generate_with_history()` (multi-turn) methods. `GroqClient` implements both. Switch providers by changing `LLM_PROVIDER` in `.env` — no code changes needed.
 
+**Prompt injection hardening** — Four lightweight defenses added 2026-05-24:
+1. All system prompts append a confidentiality instruction so the LLM won't quote its own prompt when asked.
+2. Retrieved Pinecone chunks are wrapped in `<club_data>` delimiters with an "untrusted data" framing in `_build_user_prompt()` — guards against indirect injection from poisoned club records.
+3. User input is whitespace-normalized (`" ".join(prompt.split())`) in `app.py` before any LLM call — closes newline injection that could escape the rewrite prompt.
+4. Input is capped at 500 characters in `app.py` and via `Field(max_length=500)` in `api/models.py` — prevents unbounded token spend in the query rewrite step.
+
 **Evaluation is separate from prod** — `eval/` has its own `requirements-eval.txt`. RAGAS + eval deps are never installed on Streamlit Cloud. The evaluator LLM is Groq `llama-3.3-70b-versatile`; embeddings use local HuggingFace `all-MiniLM-L6-v2` (~90 MB, cached after first download). No OpenAI key required.
 
 ### File Roles

@@ -2,7 +2,7 @@
 Pydantic request/response models for the MSU Club Discovery API.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
 
@@ -12,7 +12,7 @@ class ConversationMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str
+    question: str = Field(..., max_length=500)
     conversation_history: List[ConversationMessage] = []
     top_k: Optional[int] = None
     vibe: str = "scholar"
@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    question: str
+    question: str = Field(..., max_length=500)
     top_k: Optional[int] = None
     vibe: str = "scholar"
     apply_filters: bool = True
