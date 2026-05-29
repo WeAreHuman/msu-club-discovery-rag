@@ -17,6 +17,8 @@ uvicorn[standard]>=0.29.0
 # Utilities
 pydantic
 requests
+pandas>=2.0.0
+pyarrow>=14.0.0
 
 # Observability (optional — tracing disabled when LANGSMITH_API_KEY is not set)
 langsmith>=0.1.0

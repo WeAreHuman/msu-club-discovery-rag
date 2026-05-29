@@ -42,6 +42,7 @@ Copy `.env.example` to `.env` and fill in:
 - `LLM_PROVIDER=groq` and `GROQ_API_KEY` — recommended (free tier)
 - `SCRAPER_ORGS_DIR` — path to the `msu_scraper/data/orgs/` directory
 - `API_BASE_URL` — URL of the FastAPI backend (default: `http://localhost:8000`)
+- `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT` — optional, for tracing query rewrites and chat calls
 - `OPENAI_API_KEY` — NOT required; eval uses Groq + local HuggingFace embeddings (no OpenAI needed)
 
 ## Architecture
@@ -116,19 +117,15 @@ FastAPI  →  RAGEngine.chat(question, conversation_history)
 
 **Deterministic chunk IDs** — IDs follow `{slug}_{type}_{index}` patterns so re-ingestion upserts to the same IDs (idempotent). The checkpoint file `.ingest_checkpoint.txt` tracks completed slugs to allow resuming after rate-limit failures.
 
-**Query rewriting** — On follow-up turns, `_rewrite_query()` makes a fast LLM call (temp=0, max 80 tokens) to turn ambiguous references ("tell me more about the first one", "what about their dues?") into a standalone search query before hitting Pinecone. The original question is still passed to the final LLM call so the answer sounds natural. Skipped on the first turn (no history = no ambiguity).
+**Query rewriting** — Every user query goes through `_rewrite_query()`, which makes a fast LLM call (temp=0, max 80 tokens) to improve search quality. On follow-ups, this turns ambiguous references ("tell me more about the first one", "what about their dues?") into standalone search queries. On first turns and well-formed queries, the rewriter returns the original question. The original question is still passed to the final LLM call so the answer sounds natural. Rewrite calls are traced in LangSmith for observability.
 
 **Multi-turn conversation** — Streamlit `st.session_state` holds two stores: `messages` (full display state per turn) and `chat_history` (plain `{role, content}` pairs for the LLM). Context is injected only into the current user message — prior user messages in history are raw questions only. This keeps history lightweight.
 
 **Vibe selector** — `_build_system_prompt(vibe)` returns one of three system prompts (`"scholar"`, `"buddy"`, `"nofilter"`). Each prompt includes an instruction to end every answer with one empathetic follow-up question. Retrieval is identical across all vibes; only the system prompt string changes.
 
-**LLM abstraction** — `BaseLLMClient` in `src/llm_client.py` with `generate()` (single-turn) and `generate_with_history()` (multi-turn) methods. `GroqClient` implements both. Switch providers by changing `LLM_PROVIDER` in `.env` — no code changes needed.
+**Feedback buttons** — The Streamlit UI includes thumbs-up/down buttons for each answer. Feedback is not currently persisted, but the UI provides a direct way for users to rate response quality. Provider name (e.g., "Groq") is hidden from the UI to keep the focus on the assistant's capabilities.
 
-**Prompt injection hardening** — Four lightweight defenses added 2026-05-24:
-1. All system prompts append a confidentiality instruction so the LLM won't quote its own prompt when asked.
-2. Retrieved Pinecone chunks are wrapped in `<club_data>` delimiters with an "untrusted data" framing in `_build_user_prompt()` — guards against indirect injection from poisoned club records.
-3. User input is whitespace-normalized (`" ".join(prompt.split())`) in `app.py` before any LLM call — closes newline injection that could escape the rewrite prompt.
-4. Input is capped at 500 characters in `app.py` and via `Field(max_length=500)` in `api/models.py` — prevents unbounded token spend in the query rewrite step.
+**LLM abstraction** — `BaseLLMClient` in `src/llm_client.py` with `generate()` (single-turn) and `generate_with_history()` (multi-turn) methods. `GroqClient` implements both. Switch providers by changing `LLM_PROVIDER` in `.env` — no code changes needed.
 
 **Evaluation is separate from prod** — `eval/` has its own `requirements-eval.txt`. RAGAS + eval deps are never installed on Streamlit Cloud. The evaluator LLM is Groq `llama-3.3-70b-versatile`; embeddings use local HuggingFace `all-MiniLM-L6-v2` (~90 MB, cached after first download). No OpenAI key required.
 
